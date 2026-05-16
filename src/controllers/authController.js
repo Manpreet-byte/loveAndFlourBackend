@@ -269,17 +269,10 @@ export async function refresh(req, res, next) {
       if (expiresAt < Date.now()) return { ok: false, status: 401, message: 'Expired refresh token' };
 
       if (row.revoked_at) {
-        // If we already rotated this refresh token (replaced_by_id exists), this can happen with
-        // parallel refresh calls from the browser. Do NOT revoke the family or bump token_version,
-        // and do NOT clear the cookie — the other refresh response likely set a newer cookie.
-        if (row.replaced_by_id) {
-          return { ok: false, status: 401, message: 'Refresh token already used', code: 'REFRESH_TOKEN_ROTATED', clearCookie: false };
-        }
-
         // Possible token reuse (stolen token) -> revoke entire family.
         await revokeRefreshTokensByFamily({ userId: row.user_id, tokenFamily: row.token_family }, { conn });
         await bumpTokenVersion({ userId: row.user_id });
-        return { ok: false, status: 401, message: 'Invalid refresh token', code: 'REFRESH_TOKEN_REUSED', clearCookie: true };
+        return { ok: false, status: 401, message: 'Invalid refresh token' };
       }
 
       const user = await findUserById(row.user_id);
@@ -294,7 +287,7 @@ export async function refresh(req, res, next) {
     });
 
     if (!result.ok) {
-      if (result.clearCookie !== false) clearRefreshCookie(res);
+      clearRefreshCookie(res);
       logAuditEvent({
         actorType: 'system',
         actorId: null,
@@ -303,7 +296,7 @@ export async function refresh(req, res, next) {
         entityId: null,
         ...getRequestAuditContext(req),
         statusCode: result.status,
-        metadata: { reason: result.message, code: result.code ?? null },
+        metadata: { reason: result.message },
       });
       return res.status(result.status).json({ error: { message: result.message } });
     }

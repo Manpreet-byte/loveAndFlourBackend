@@ -86,10 +86,6 @@ All routes below require `Authorization: Bearer <token>` and role `admin`, excep
 - Access token: returned in JSON and sent by clients via `Authorization: Bearer <token>`
 - Refresh token: stored in an HttpOnly cookie (rotated on each refresh)
 
-Deployment notes:
-- In production with multiple instances/replicas, `JWT_ACCESS_SECRET`/`JWT_SECRET` and `TOKEN_HASH_SECRET` must be identical across all instances, otherwise login can succeed but subsequent authenticated calls (e.g. `GET /api/profile`) will 401.
-- If the web app is on a different origin than the API, configure cookie settings appropriately (`AUTH_COOKIE_SAMESITE=none` and `COOKIE_SECURE=true` over HTTPS) so refresh cookies are accepted by browsers.
-
 Endpoints:
 - `POST /api/auth/signup`, `POST /api/auth/login`
 - `POST /api/auth/refresh`

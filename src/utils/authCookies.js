@@ -1,8 +1,6 @@
 import { env } from './env.js';
 
 function isSecureCookie() {
-  // Browsers require `Secure` when `SameSite=None`.
-  if (env.AUTH_COOKIE_SAMESITE === 'none') return true;
   if (env.COOKIE_SECURE != null) return env.COOKIE_SECURE;
   return env.NODE_ENV === 'production';
 }

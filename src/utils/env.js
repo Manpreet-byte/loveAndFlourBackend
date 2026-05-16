@@ -199,6 +199,18 @@ export const env = {
   SMTP_TLS_REJECT_UNAUTHORIZED: parsed.SMTP_TLS_REJECT_UNAUTHORIZED ?? null,
 };
 
+const publicWebOrigin = (() => {
+  try {
+    return new URL(String(env.PUBLIC_WEB_BASE_URL ?? '').trim()).origin;
+  } catch {
+    return '';
+  }
+})();
+
+if (publicWebOrigin && !env.ALLOWED_ORIGINS.includes(publicWebOrigin)) {
+  env.ALLOWED_ORIGINS = [...env.ALLOWED_ORIGINS, publicWebOrigin];
+}
+
 if (isProd) {
   if (!env.JWT_ACCESS_SECRET) {
     throw new Error('JWT_ACCESS_SECRET is required in production');

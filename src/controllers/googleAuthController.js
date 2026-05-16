@@ -34,16 +34,8 @@ function makeState() {
   return generateOpaqueToken(24);
 }
 
-function isSecureCookie(req) {
-  // If SameSite=None is used, modern browsers require Secure.
-  if (env.AUTH_COOKIE_SAMESITE === 'none') return true;
-  if (env.COOKIE_SECURE != null) return env.COOKIE_SECURE;
-  const proto = (req.headers['x-forwarded-proto'] ?? req.protocol ?? '').toString().split(',')[0].trim().toLowerCase();
-  return proto === 'https' || env.NODE_ENV === 'production';
-}
-
 function setStateCookie(res, state) {
-  const secure = isSecureCookie(res.req);
+  const secure = Boolean(env.COOKIE_SECURE);
   res.cookie('google_oauth_state', state, {
     httpOnly: true,
     sameSite: env.AUTH_COOKIE_SAMESITE,
@@ -55,7 +47,7 @@ function setStateCookie(res, state) {
 }
 
 function setNextCookie(res, nextBase) {
-  const secure = isSecureCookie(res.req);
+  const secure = Boolean(env.COOKIE_SECURE);
   res.cookie('google_oauth_next', nextBase, {
     httpOnly: true,
     sameSite: env.AUTH_COOKIE_SAMESITE,
@@ -67,7 +59,7 @@ function setNextCookie(res, nextBase) {
 }
 
 function setModeCookie(res, mode) {
-  const secure = isSecureCookie(res.req);
+  const secure = Boolean(env.COOKIE_SECURE);
   res.cookie('google_oauth_mode', mode, {
     httpOnly: true,
     sameSite: env.AUTH_COOKIE_SAMESITE,
@@ -79,7 +71,7 @@ function setModeCookie(res, mode) {
 }
 
 function clearStateCookie(res) {
-  const secure = isSecureCookie(res.req);
+  const secure = Boolean(env.COOKIE_SECURE);
   res.clearCookie('google_oauth_state', {
     httpOnly: true,
     sameSite: env.AUTH_COOKIE_SAMESITE,
@@ -90,7 +82,7 @@ function clearStateCookie(res) {
 }
 
 function clearNextCookie(res) {
-  const secure = isSecureCookie(res.req);
+  const secure = Boolean(env.COOKIE_SECURE);
   res.clearCookie('google_oauth_next', {
     httpOnly: true,
     sameSite: env.AUTH_COOKIE_SAMESITE,
@@ -101,7 +93,7 @@ function clearNextCookie(res) {
 }
 
 function clearModeCookie(res) {
-  const secure = isSecureCookie(res.req);
+  const secure = Boolean(env.COOKIE_SECURE);
   res.clearCookie('google_oauth_mode', {
     httpOnly: true,
     sameSite: env.AUTH_COOKIE_SAMESITE,

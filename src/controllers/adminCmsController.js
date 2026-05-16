@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { pool } from '../config/db.js';
 import { getRequestAuditContext, logAuditEvent } from '../services/auditLogService.js';
+import { invalidateHomepageContent } from '../services/cacheInvalidationService.js';
 import { enqueuePushForUsers } from '../services/push/pushOutboxService.js';
 
 function stripScripts(html) {
@@ -76,6 +77,7 @@ export async function patchHomepage(req, res, next) {
   try {
     const payload = contentPatchSchema.parse(req.body ?? {});
     await upsertSiteContent({ actorId: req.user.id, key: 'homepage', payload });
+    await invalidateHomepageContent();
     logAuditEvent({
       actorType: 'admin',
       actorId: req.user.id,

@@ -63,7 +63,7 @@ export async function listPublicCourses(_req, res, next) {
                   cp.currency, cp.amount_cents
              FROM courses c
         LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
-            WHERE c.is_published = 1 AND c.kind = 'workshop' AND c.source = ?
+            WHERE c.is_published = 1 AND c.kind = 'workshop' AND (c.source = ? OR c.source = 'local')
          ORDER BY COALESCE(c.published_at, c.created_at) DESC
             LIMIT 200`,
           [IMPORT_SOURCE],
@@ -111,7 +111,7 @@ export async function getPublicCourseBySlug(req, res, next) {
                   cp.currency, cp.amount_cents
              FROM courses c
         LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
-            WHERE c.slug = ? AND c.is_published = 1 AND c.kind = 'workshop' AND c.source = ?
+            WHERE c.slug = ? AND c.is_published = 1 AND c.kind = 'workshop' AND (c.source = ? OR c.source = 'local')
          LIMIT 1`,
           [slug, IMPORT_SOURCE],
         );
@@ -149,7 +149,7 @@ export async function listPublicWorkshops(_req, res, next) {
                   cp.currency, cp.amount_cents
              FROM courses c
         LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
-            WHERE c.is_published = 1 AND c.kind = 'workshop' AND c.source = ?
+            WHERE c.is_published = 1 AND c.kind = 'workshop' AND (c.source = ? OR c.source = 'local')
          ORDER BY COALESCE(c.published_at, c.created_at) DESC
             LIMIT 200`,
           [IMPORT_SOURCE],
@@ -197,7 +197,7 @@ export async function getPublicWorkshopBySlug(req, res, next) {
                   cp.currency, cp.amount_cents
              FROM courses c
         LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
-            WHERE c.slug = ? AND c.is_published = 1 AND c.kind = 'workshop' AND c.source = ?
+            WHERE c.slug = ? AND c.is_published = 1 AND c.kind = 'workshop' AND (c.source = ? OR c.source = 'local')
          LIMIT 1`,
           [slug, IMPORT_SOURCE],
         );
@@ -233,7 +233,7 @@ export async function listPublicRecipes(_req, res, next) {
         const [rows] = await pool.query(
           `SELECT r.id, r.title, r.slug, r.summary, r.content, r.featured_image_url, r.published_at, r.created_at
              FROM recipes r
-            WHERE r.is_published = 1 AND r.source = ?
+            WHERE r.is_published = 1 AND (r.source = ? OR r.source = 'local')
          ORDER BY COALESCE(r.published_at, r.created_at) DESC
             LIMIT 200`,
           [IMPORT_SOURCE],
@@ -279,7 +279,7 @@ export async function getPublicRecipeBySlug(req, res, next) {
         const [rows] = await pool.query(
           `SELECT r.id, r.title, r.slug, r.summary, r.content, r.featured_image_url, r.published_at, r.created_at
              FROM recipes r
-            WHERE r.slug = ? AND r.is_published = 1 AND r.source = ?
+            WHERE r.slug = ? AND r.is_published = 1 AND (r.source = ? OR r.source = 'local')
          LIMIT 1`,
           [slug, IMPORT_SOURCE],
         );

@@ -11,7 +11,6 @@ import { generalApiLimiter } from './middleware/rateLimiters.js';
 import { requestContext } from './middleware/requestContext.js';
 import { httpLogger } from './middleware/httpLogger.js';
 import { metricsMiddleware } from './middleware/metricsMiddleware.js';
-import { logger } from './utils/logger.js';
 import authRoutes from './routes/authRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
@@ -58,30 +57,9 @@ app.use('/api/webhooks', express.raw({ type: 'application/json', limit: '2mb' })
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-function buildAllowedOrigins() {
-  const allowed = new Set((env.ALLOWED_ORIGINS ?? []).filter(Boolean));
-  // Ensure the configured public web base URL is always allowed (common deploy default).
-  try {
-    const origin = new URL(String(env.PUBLIC_WEB_BASE_URL)).origin;
-    if (origin) allowed.add(origin);
-  } catch {
-    // ignore
-  }
-  return allowed;
-}
-
-const allowedOrigins = buildAllowedOrigins();
-
 app.use(
   cors({
-    origin(origin, callback) {
-      // Same-origin / server-to-server / curl requests may have no Origin.
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.has(origin)) return callback(null, true);
-      logger.warn({ origin, allowedOrigins: Array.from(allowedOrigins) }, 'cors_origin_rejected');
-      return callback(new Error('Not allowed by CORS'));
-    },
+    origin: env.ALLOWED_ORIGINS,
     credentials: true,
   }),
 );
