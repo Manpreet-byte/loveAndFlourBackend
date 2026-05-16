@@ -21,7 +21,7 @@ export async function insertRefreshToken(
 export async function findRefreshTokenByHash(tokenHash, { conn, forUpdate = false } = {}) {
   const db = pickConn(conn);
   const sql = `
-    SELECT id, user_id, token_family, parent_id, expires_at, revoked_at
+    SELECT id, user_id, token_family, parent_id, expires_at, revoked_at, replaced_by_id
       FROM refresh_tokens
      WHERE token_hash = ?
      LIMIT 1
