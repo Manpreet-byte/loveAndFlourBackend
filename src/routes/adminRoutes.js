@@ -16,12 +16,13 @@ import {
   adminDownloadInvoice,
   adminGetOrder,
   adminListOrders,
+  adminReconcileOrder,
   adminRefundOrder,
   adminUpdateOrder,
 } from '../controllers/adminOrdersController.js';
 import { createLiveSession, deleteLiveSession, listLiveSessions, updateLiveSession } from '../controllers/liveSessionAdminController.js';
 import { createRecording, deleteRecording, listRecordings, updateRecording } from '../controllers/recordingAdminController.js';
-import { enrollUser, listEnrollments, listUsers, removeEnrollment } from '../controllers/userAdminController.js';
+import { enrollUser, impersonateUser, listEnrollments, listUsers, patchEnrollment, removeEnrollment } from '../controllers/userAdminController.js';
 import { createCourseLesson, deleteLesson, getLessonAdmin, listCourseLessonsAdmin, reorderCourseLessons, updateLesson } from '../controllers/lessonAdminController.js';
 import { adminReactivateCertificate, adminRevokeCertificate } from '../controllers/certificateController.js';
 import adminAnalyticsRoutes from './adminAnalyticsRoutes.js';
@@ -46,6 +47,8 @@ import { adminImportLoveAndFlour } from '../controllers/importLoveAndFlourContro
 import { adminPreviewLoveAndFlour } from '../controllers/importLoveAndFlourPreviewController.js';
 import { adminGetRazorpayConfig, adminPatchRazorpayConfig } from '../controllers/adminRazorpayConfigController.js';
 import { superListAdmins, superResetAdminPassword, superRevokeAdmin, superTransferSuperAdmin } from '../controllers/superAdminController.js';
+import { adminCreateTag, adminDeleteTag, adminListTags } from '../controllers/tagAdminController.js';
+import { adminGetCourseProgress } from '../controllers/adminCourseProgressController.js';
 
 const router = Router();
 
@@ -107,6 +110,7 @@ router.get('/system/metrics', adminSystemMetrics);
 // Courses
 router.post('/courses', createCourse);
 router.get('/courses', listCourses);
+router.get('/courses/:id/progress', adminGetCourseProgress);
 router.patch('/courses/:id', updateCourse);
 router.delete('/courses/:id', deleteCourse);
 
@@ -136,10 +140,16 @@ router.get('/recipes', listRecipes);
 router.patch('/recipes/:id', updateRecipe);
 router.delete('/recipes/:id', deleteRecipe);
 
+// Tags (recipes)
+router.get('/tags', adminListTags);
+router.post('/tags', adminCreateTag);
+router.delete('/tags/:id', adminDeleteTag);
+
 // Orders + payments ops
 router.get('/orders', adminListOrders);
 router.get('/orders/:id', adminGetOrder);
 router.patch('/orders/:id', adminUpdateOrder);
+router.post('/orders/:id/reconcile', adminReconcileOrder);
 router.post('/orders/:id/refund', adminRefundOrder);
 router.get('/orders/:id/invoice', adminDownloadInvoice);
 
@@ -164,8 +174,10 @@ router.delete('/recordings/:id', deleteRecording);
 
 // Users + enrollments
 router.get('/users', listUsers);
+router.post('/users/:id/impersonate', impersonateUser);
 router.get('/enrollments', listEnrollments);
 router.post('/enrollments', enrollUser);
+router.patch('/enrollments/:id', patchEnrollment);
 router.delete('/enrollments/:id', removeEnrollment);
 
 // Lessons (LMS core)

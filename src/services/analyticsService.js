@@ -593,3 +593,37 @@ export async function getRetentionAnalytics({ from, to }) {
     note: 'Retention is a proxy based on last_login_at compared to signup date (not event-level return visits).',
   };
 }
+
+export async function getQaReportAnalytics({ from, to }) {
+  const range = rangeDefaults({ from, to, days: 30 });
+  if (!range) return { range: null, counts: {} };
+  const [[counts]] = await pool.query(
+    `SELECT
+        COALESCE(SUM(CASE WHEN q.status = 'open' THEN 1 ELSE 0 END), 0) AS open,
+        COALESCE(SUM(CASE WHEN q.status = 'answered' THEN 1 ELSE 0 END), 0) AS answered,
+        COALESCE(SUM(CASE WHEN q.status = 'resolved' THEN 1 ELSE 0 END), 0) AS resolved,
+        COALESCE(SUM(CASE WHEN q.status = 'closed' THEN 1 ELSE 0 END), 0) AS closed,
+        COUNT(*) AS total
+       FROM course_questions q
+      WHERE q.created_at >= ? AND q.created_at < DATE_ADD(?, INTERVAL 1 DAY)`,
+    [range.from, range.to],
+  );
+  return { range, counts };
+}
+
+export async function getSupportReportAnalytics({ from, to }) {
+  const range = rangeDefaults({ from, to, days: 30 });
+  if (!range) return { range: null, counts: {} };
+  const [[counts]] = await pool.query(
+    `SELECT
+        COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), 0) AS open,
+        COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
+        COALESCE(SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END), 0) AS resolved,
+        COALESCE(SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END), 0) AS closed,
+        COUNT(*) AS total
+       FROM support_tickets
+      WHERE created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)`,
+    [range.from, range.to],
+  );
+  return { range, counts };
+}

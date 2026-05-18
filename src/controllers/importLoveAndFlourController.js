@@ -181,7 +181,7 @@ export async function adminImportLoveAndFlour(req, res, next) {
             if (courseId) {
               if (amountCents != null) {
                 // eslint-disable-next-line no-await-in-loop
-                await pool.query('UPDATE course_prices SET is_active = 0 WHERE course_id = ?', [courseId]);
+                await pool.query('UPDATE course_prices SET is_active = 0 WHERE course_id = ? AND currency = ?', [courseId, currency]);
                 // eslint-disable-next-line no-await-in-loop
                 await pool.query(
                   'INSERT INTO course_prices (course_id, currency, amount_cents, is_active) VALUES (?, ?, ?, 1)',

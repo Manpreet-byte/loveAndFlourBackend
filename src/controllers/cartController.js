@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { pool } from '../config/db.js';
+import { computeEffectivePriceCents, getDefaultCurrency } from '../services/pricingService.js';
 
 const upsertSchema = z.object({
   items: z
@@ -24,18 +25,23 @@ export async function getCart(req, res, next) {
   try {
     const userId = req.user.id;
     const cartId = await ensureCartId({ userId });
+    const currency = await getDefaultCurrency();
     const [rows] = await pool.query(
       `SELECT ci.id, ci.course_id, ci.quantity,
               c.title, c.slug, c.featured_image_url,
-              cp.currency, cp.amount_cents
+              cp.currency, cp.amount_cents, cp.compare_at_amount_cents, cp.sale_amount_cents, cp.sale_starts_at, cp.sale_ends_at
          FROM cart_items ci
          JOIN courses c ON c.id = ci.course_id
-    LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
+    LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1 AND cp.currency = ?
         WHERE ci.cart_id = ?
      ORDER BY ci.updated_at DESC`,
-      [cartId],
+      [currency, cartId],
     );
-    return res.json({ cart: { id: cartId, items: rows } });
+    const items = (rows ?? []).map((r) => {
+      const effective = r.amount_cents && r.currency ? computeEffectivePriceCents(r) : r.amount_cents;
+      return { ...r, amount_cents: effective };
+    });
+    return res.json({ cart: { id: cartId, items } });
   } catch (err) {
     return next(err);
   }
@@ -71,4 +77,3 @@ export async function deleteCartItem(req, res, next) {
     return next(err);
   }
 }
-

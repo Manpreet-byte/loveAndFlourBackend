@@ -5,8 +5,10 @@ import {
   getDashboardAnalytics,
   getEnrollmentAnalytics,
   getOrdersSummaryAnalytics,
+  getQaReportAnalytics,
   getRevenueAnalytics,
   getRetentionAnalytics,
+  getSupportReportAnalytics,
   getTopCoursesAnalytics,
   getUserAnalytics,
 } from '../services/analyticsService.js';
@@ -101,6 +103,26 @@ export async function retention(req, res, next) {
     const { from, to } = rangeSchema.parse(req.query);
     const data = await getRetentionAnalytics({ from, to });
     return res.json({ retention: data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function qaReport(req, res, next) {
+  try {
+    const { from, to } = rangeSchema.parse(req.query);
+    const data = await getQaReportAnalytics({ from, to });
+    return res.json({ qa: data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function supportReport(req, res, next) {
+  try {
+    const { from, to } = rangeSchema.parse(req.query);
+    const data = await getSupportReportAnalytics({ from, to });
+    return res.json({ support: data });
   } catch (err) {
     return next(err);
   }

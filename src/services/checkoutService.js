@@ -2,9 +2,11 @@ import { z } from 'zod';
 import { pool } from '../config/db.js';
 import { findActiveCouponByCode, countCouponUsages, countCouponUsagesForUser } from '../models/couponModel.js';
 import { findBulkDiscountRuleForQty } from '../models/discountRuleModel.js';
+import { computeEffectivePriceCents, getDefaultCurrency } from './pricingService.js';
 
 const checkoutSchema = z.object({
   provider: z.enum(['razorpay']).default('razorpay'),
+  currency: z.string().trim().length(3).optional().nullable(),
   items: z
     .array(
       z.object({
@@ -37,15 +39,17 @@ export function parseCheckoutRequest(body) {
   return checkoutSchema.parse(body);
 }
 
-export async function computeCheckout({ userId, items, couponCode }) {
+export async function computeCheckout({ userId, items, couponCode, currency: desiredCurrency = null }) {
   const courseIds = [...new Set(items.map((i) => i.course_id))];
+  const selectedCurrency = desiredCurrency ? String(desiredCurrency).trim().toUpperCase() : await getDefaultCurrency();
   const [rows] = await pool.query(
     `SELECT c.id, c.title, c.is_published,
-            cp.currency, cp.amount_cents
+            c.kind,
+            cp.currency, cp.amount_cents, cp.compare_at_amount_cents, cp.sale_amount_cents, cp.sale_starts_at, cp.sale_ends_at
        FROM courses c
-  LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
+  LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1 AND cp.currency = ?
       WHERE c.id IN (?)`,
-    [courseIds],
+    [selectedCurrency, courseIds],
   );
 
   const byId = new Map(rows.map((r) => [Number(r.id), r]));
@@ -73,7 +77,7 @@ export async function computeCheckout({ userId, items, couponCode }) {
       throw err;
     }
     const quantity = Number(item.quantity ?? 1);
-    const unitPriceCents = Number(course.amount_cents);
+    const unitPriceCents = Number(computeEffectivePriceCents(course));
     const lineSubtotalCents = unitPriceCents * quantity;
     lineItems.push({
       courseId: Number(course.id),
@@ -90,6 +94,43 @@ export async function computeCheckout({ userId, items, couponCode }) {
     const err = new Error('Mixed-currency checkout is not supported');
     err.status = 400;
     throw err;
+  }
+
+  // Seat-limit guardrails for live workshops (best-effort):
+  // If there is an upcoming/live session with seat_limit > 0, block purchases when active enrollments >= seat_limit.
+  const workshopIds = courseIds.filter((id) => String(byId.get(Number(id))?.kind ?? '') === 'workshop');
+  if (workshopIds.length) {
+    const [seatRows] = await pool.query(
+      `SELECT ls.course_id, MAX(ls.seat_limit) AS seat_limit
+         FROM live_sessions ls
+        WHERE ls.course_id IN (?)
+          AND ls.status IN ('upcoming','live')
+          AND ls.seat_limit > 0
+     GROUP BY ls.course_id`,
+      [workshopIds],
+    );
+    const seatByCourse = new Map((seatRows ?? []).map((r) => [Number(r.course_id), Number(r.seat_limit ?? 0)]));
+    if (seatByCourse.size) {
+      const [enrRows] = await pool.query(
+        `SELECT course_id, COUNT(*) AS c
+           FROM enrollments
+          WHERE course_id IN (?)
+            AND status = 'active'
+            AND expiry_date >= CURDATE()
+       GROUP BY course_id`,
+        [Array.from(seatByCourse.keys())],
+      );
+      const enrolledByCourse = new Map((enrRows ?? []).map((r) => [Number(r.course_id), Number(r.c ?? 0)]));
+      for (const [cid, limit] of seatByCourse.entries()) {
+        const enrolled = enrolledByCourse.get(cid) ?? 0;
+        if (limit > 0 && enrolled >= limit) {
+          const err = new Error('This workshop is sold out. Join the waitlist from the workshop page.');
+          err.status = 409;
+          err.details = { course_id: cid, seat_limit: limit, enrolled };
+          throw err;
+        }
+      }
+    }
   }
 
   const subtotalCents = lineItems.reduce((sum, li) => sum + li.lineSubtotalCents, 0);

@@ -13,10 +13,17 @@ const createCourseSchema = z.object({
   content: z.string().optional().nullable(),
   featured_image_url: z.string().url().max(1024).optional().nullable(),
   category_ids: z.array(z.coerce.number().int().positive()).default([]),
+  qa_enabled: z.coerce.boolean().optional().default(true),
+  is_published: z.coerce.boolean().optional().default(true),
+  publish_at: z.string().datetime().optional().nullable(),
   price: z
     .object({
       currency: z.string().length(3).default('INR'),
       amount_cents: z.coerce.number().int().nonnegative(),
+      compare_at_amount_cents: z.coerce.number().int().nonnegative().optional().nullable(),
+      sale_amount_cents: z.coerce.number().int().nonnegative().optional().nullable(),
+      sale_starts_at: z.string().datetime().optional().nullable(),
+      sale_ends_at: z.string().datetime().optional().nullable(),
     })
     .optional()
     .nullable(),
@@ -36,19 +43,40 @@ export async function createCourse(req, res, next) {
     const cleanedSummary = payload.summary != null ? sanitizeBasicHtml(payload.summary) : null;
     const cleanedContent = payload.content != null ? sanitizeBasicHtml(payload.content) : null;
     const slug = slugify(payload.title);
-    const publishedAt = new Date();
+    const isPublished = Boolean(payload.is_published);
+    const publishedAt = isPublished ? new Date() : null;
+    const publishAt = !isPublished && payload.publish_at ? toMysqlDatetime(payload.publish_at) : null;
 
     const [result] = await pool.query(
-      'INSERT INTO courses (title, slug, kind, summary, content, featured_image_url, is_published, published_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
-      [payload.title, slug, kind, cleanedSummary ?? null, cleanedContent ?? null, payload.featured_image_url ?? null, publishedAt],
+      'INSERT INTO courses (title, slug, kind, summary, content, featured_image_url, qa_enabled, is_published, publish_at, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        payload.title,
+        slug,
+        kind,
+        cleanedSummary ?? null,
+        cleanedContent ?? null,
+        payload.featured_image_url ?? null,
+        payload.qa_enabled ? 1 : 0,
+        isPublished ? 1 : 0,
+        publishAt,
+        publishedAt,
+      ],
     );
 
     const courseId = result.insertId;
 
     if (payload.price && payload.price.amount_cents !== undefined) {
       await pool.query(
-        'INSERT INTO course_prices (course_id, currency, amount_cents, is_active) VALUES (?, ?, ?, 1)',
-        [courseId, payload.price.currency ?? 'INR', payload.price.amount_cents],
+        'INSERT INTO course_prices (course_id, currency, amount_cents, compare_at_amount_cents, sale_amount_cents, sale_starts_at, sale_ends_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)',
+        [
+          courseId,
+          (payload.price.currency ?? 'INR').toUpperCase(),
+          payload.price.amount_cents,
+          payload.price.compare_at_amount_cents ?? null,
+          payload.price.sale_amount_cents ?? null,
+          payload.price.sale_starts_at ? toMysqlDatetime(payload.price.sale_starts_at) : null,
+          payload.price.sale_ends_at ? toMysqlDatetime(payload.price.sale_ends_at) : null,
+        ],
       );
     }
 
@@ -87,6 +115,8 @@ export async function listCourses(req, res, next) {
     if (kind && kind !== 'course' && kind !== 'workshop') {
       return res.status(400).json({ error: { message: 'Invalid kind' } });
     }
+    const currency = String(req.query.currency ?? '').trim().toUpperCase();
+    if (currency && currency.length !== 3) return res.status(400).json({ error: { message: 'Invalid currency' } });
     const source = String(req.query.source ?? '').trim();
     if (source && source.length > 40) {
       return res.status(400).json({ error: { message: 'Invalid source' } });
@@ -101,16 +131,18 @@ export async function listCourses(req, res, next) {
       where.push('c.source = ?');
       args.push(source);
     }
+    const joinCurrency = currency || 'INR';
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const [rows] = await pool.query(
       `SELECT c.id, c.title, c.slug, c.summary, c.content, c.featured_image_url, c.is_published, c.published_at, c.created_at, c.updated_at,
-              c.kind, cp.currency, cp.amount_cents
+              c.kind, c.qa_enabled, c.publish_at,
+              cp.currency, cp.amount_cents, cp.compare_at_amount_cents, cp.sale_amount_cents, cp.sale_starts_at, cp.sale_ends_at
          FROM courses c
-    LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
+    LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1 AND cp.currency = ?
         ${whereSql}
      ORDER BY c.created_at DESC
         LIMIT 200`,
-      args,
+      [joinCurrency, ...args],
     );
     const list = rows ?? [];
     if (!list.length) return res.json({ courses: [] });
@@ -173,11 +205,23 @@ export async function updateCourse(req, res, next) {
       fields.push('featured_image_url = ?');
       values.push(payload.featured_image_url ?? null);
     }
+    if (payload.qa_enabled !== undefined) {
+      fields.push('qa_enabled = ?');
+      values.push(payload.qa_enabled ? 1 : 0);
+    }
+    if (payload.publish_at !== undefined) {
+      fields.push('publish_at = ?');
+      values.push(payload.publish_at ? toMysqlDatetime(payload.publish_at) : null);
+    }
     if (payload.is_published !== undefined) {
       fields.push('is_published = ?');
       values.push(payload.is_published ? 1 : 0);
       fields.push('published_at = ?');
       values.push(payload.is_published ? new Date() : null);
+      if (payload.is_published) {
+        fields.push('publish_at = ?');
+        values.push(null);
+      }
     }
 
     if (fields.length) {
@@ -186,10 +230,19 @@ export async function updateCourse(req, res, next) {
     }
 
     if (payload.price) {
-      await pool.query('UPDATE course_prices SET is_active = 0 WHERE course_id = ?', [courseId]);
+      const cur = String(payload.price.currency ?? 'INR').toUpperCase();
+      await pool.query('UPDATE course_prices SET is_active = 0 WHERE course_id = ? AND currency = ?', [courseId, cur]);
       await pool.query(
-        'INSERT INTO course_prices (course_id, currency, amount_cents, is_active) VALUES (?, ?, ?, 1)',
-        [courseId, payload.price.currency ?? 'INR', payload.price.amount_cents],
+        'INSERT INTO course_prices (course_id, currency, amount_cents, compare_at_amount_cents, sale_amount_cents, sale_starts_at, sale_ends_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)',
+        [
+          courseId,
+          cur,
+          payload.price.amount_cents,
+          payload.price.compare_at_amount_cents ?? null,
+          payload.price.sale_amount_cents ?? null,
+          payload.price.sale_starts_at ? toMysqlDatetime(payload.price.sale_starts_at) : null,
+          payload.price.sale_ends_at ? toMysqlDatetime(payload.price.sale_ends_at) : null,
+        ],
       );
     }
 

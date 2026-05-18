@@ -12,12 +12,24 @@ const listSchema = z.object({
   cursor: z.coerce.number().int().positive().optional().nullable(),
 });
 
+async function assertCourseQaEnabledForActor({ courseId, actorRole }) {
+  const role = String(actorRole ?? '');
+  if (role === 'admin' || role === 'super_admin' || role === 'instructor' || role === 'support_agent') return;
+  const [[row]] = await pool.query('SELECT qa_enabled FROM courses WHERE id = ? LIMIT 1', [courseId]);
+  if (row && Number(row.qa_enabled) !== 1) {
+    const err = new Error('Q&A is disabled for this course.');
+    err.status = 403;
+    throw err;
+  }
+}
+
 export async function listQuestionsByCourse(req, res, next) {
   try {
     const userId = req.user.id;
     const courseId = Number(req.params.courseId);
     if (!Number.isFinite(courseId) || courseId <= 0) return res.status(400).json({ error: { message: 'Invalid course id' } });
     const { limit, cursor } = listSchema.parse(req.query);
+    await assertCourseQaEnabledForActor({ courseId, actorRole: req.user?.role });
     await assertActiveEnrollment({ userId, courseId });
     const data = await listCourseQuestions({ courseId, limit: limit ?? 20, cursor: cursor ?? null });
     return res.json({ questions: data.questions ?? [], next_cursor: data.next_cursor ?? null });
@@ -38,6 +50,7 @@ export async function createQuestion(req, res, next) {
   try {
     const userId = req.user.id;
     const payload = createSchema.parse(req.body ?? {});
+    await assertCourseQaEnabledForActor({ courseId: payload.course_id, actorRole: req.user?.role });
     await assertActiveEnrollment({ userId, courseId: payload.course_id }, { conn });
     await conn.beginTransaction();
     const id = await createCourseQuestion(
@@ -69,6 +82,7 @@ export async function getQuestion(req, res, next) {
     const { id } = idSchema.parse(req.params);
     const question = await getCourseQuestionById({ id });
     if (!question) return res.status(404).json({ error: { message: 'Question not found' } });
+    await assertCourseQaEnabledForActor({ courseId: Number(question.course_id), actorRole: req.user?.role });
     await assertActiveEnrollment({ userId, courseId: Number(question.course_id) });
     const replies = await listRepliesForQuestion({ questionId: id });
     return res.json({ question, replies });
@@ -87,6 +101,7 @@ export async function postReply(req, res, next) {
     const payload = replySchema.parse(req.body ?? {});
     const question = await getCourseQuestionById({ id });
     if (!question) return res.status(404).json({ error: { message: 'Question not found' } });
+    await assertCourseQaEnabledForActor({ courseId: Number(question.course_id), actorRole: req.user?.role });
     await assertActiveEnrollment({ userId, courseId: Number(question.course_id) });
     await createReply({ questionId: id, userId, isAdminReply: isAdmin, bodyHtml: textToHtml(payload.body) });
 
@@ -115,6 +130,7 @@ export async function patchQuestion(req, res, next) {
     const payload = patchSchema.parse(req.body ?? {});
     const existing = await getCourseQuestionById({ id });
     if (!existing) return res.status(404).json({ error: { message: 'Question not found' } });
+    await assertCourseQaEnabledForActor({ courseId: Number(existing.course_id), actorRole: req.user?.role });
     await assertActiveEnrollment({ userId, courseId: Number(existing.course_id) });
     await updateCourseQuestion({
       id,
@@ -140,6 +156,7 @@ export async function patchQuestionStatus(req, res, next) {
     const payload = statusSchema.parse(req.body ?? {});
     const existing = await getCourseQuestionById({ id });
     if (!existing) return res.status(404).json({ error: { message: 'Question not found' } });
+    await assertCourseQaEnabledForActor({ courseId: Number(existing.course_id), actorRole: req.user?.role });
     await assertActiveEnrollment({ userId, courseId: Number(existing.course_id) });
     // Only admins can close; users can resolve their own.
     if (!isAdmin && payload.status === 'closed') return res.status(403).json({ error: { message: 'Forbidden' } });
@@ -158,6 +175,7 @@ export async function removeQuestion(req, res, next) {
     const { id } = idSchema.parse(req.params);
     const existing = await getCourseQuestionById({ id });
     if (!existing) return res.status(404).json({ error: { message: 'Question not found' } });
+    await assertCourseQaEnabledForActor({ courseId: Number(existing.course_id), actorRole: req.user?.role });
     await assertActiveEnrollment({ userId, courseId: Number(existing.course_id) });
     await deleteCourseQuestion({ id, userId, isAdmin });
     return res.json({ ok: true });
@@ -165,4 +183,3 @@ export async function removeQuestion(req, res, next) {
     return next(err);
   }
 }
-

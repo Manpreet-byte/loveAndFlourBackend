@@ -48,6 +48,8 @@ CREATE TABLE courses (
   featured_image_media_id BIGINT UNSIGNED NULL,
   level VARCHAR(60) NULL,
   language VARCHAR(60) NULL,
+  qa_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  publish_at DATETIME NULL,
   is_published TINYINT(1) NOT NULL DEFAULT 0,
   published_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -68,6 +70,10 @@ CREATE TABLE course_prices (
   course_id BIGINT UNSIGNED NOT NULL,
   currency CHAR(3) NOT NULL DEFAULT 'INR',
   amount_cents INT UNSIGNED NOT NULL,
+  compare_at_amount_cents INT UNSIGNED NULL,
+  sale_amount_cents INT UNSIGNED NULL,
+  sale_starts_at DATETIME NULL,
+  sale_ends_at DATETIME NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   valid_from DATETIME NULL,
   valid_to DATETIME NULL,
@@ -106,6 +112,7 @@ CREATE TABLE recipes (
   featured_image_url VARCHAR(1024) NULL,
   featured_image_media_id BIGINT UNSIGNED NULL,
   is_published TINYINT(1) NOT NULL DEFAULT 0,
+  publish_at DATETIME NULL,
   published_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -117,6 +124,31 @@ CREATE TABLE recipes (
   KEY idx_recipes_source_external_id (source_external_id),
   KEY idx_recipes_is_published (is_published),
   KEY idx_recipes_published_at (published_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE tags (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tag_type ENUM('recipe') NOT NULL DEFAULT 'recipe',
+  name VARCHAR(120) NOT NULL,
+  slug VARCHAR(140) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_tags_type_slug (tag_type, slug),
+  KEY idx_tags_type_name (tag_type, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE recipe_tags (
+  recipe_id BIGINT UNSIGNED NOT NULL,
+  tag_id BIGINT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (recipe_id, tag_id),
+  KEY idx_recipe_tags_tag_id (tag_id),
+  CONSTRAINT fk_recipe_tags_recipe_id
+    FOREIGN KEY (recipe_id) REFERENCES recipes(id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_recipe_tags_tag_id
+    FOREIGN KEY (tag_id) REFERENCES tags(id)
+    ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE recipe_categories (

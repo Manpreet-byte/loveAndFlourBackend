@@ -2,11 +2,62 @@ import { z } from 'zod';
 import { pool } from '../config/db.js';
 import { computeCourseExpiryDate } from '../services/enrollmentExpiry.js';
 import { enqueueEmail } from '../services/emailOutbox.js';
+import { signAccessToken } from '../utils/tokens.js';
+import { getRequestAuditContext, logAuditEvent } from '../services/auditLogService.js';
 
 export async function listUsers(req, res, next) {
   try {
-    const [rows] = await pool.query('SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC LIMIT 500');
-    return res.json({ users: rows });
+    const q = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(50000).optional().default(500),
+        offset: z.coerce.number().int().min(0).max(200000).optional().default(0),
+      })
+      .parse(req.query ?? {});
+
+    const [rows] = await pool.query(
+      'SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      [q.limit, q.offset],
+    );
+    return res.json({ users: rows, limit: q.limit, offset: q.offset });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function impersonateUser(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: { message: 'Invalid user id' } });
+
+    const [rows] = await pool.query('SELECT id, name, email, role, token_version FROM users WHERE id = ? LIMIT 1', [id]);
+    const target = rows?.[0];
+    if (!target) return res.status(404).json({ error: { message: 'User not found' } });
+
+    const token = signAccessToken({
+      userId: Number(target.id),
+      role: String(target.role ?? 'user'),
+      tokenVersion: Number(target.token_version ?? 0),
+    });
+
+    const ctx = getRequestAuditContext(req);
+    logAuditEvent({
+      actorType: 'admin',
+      actorId: req.user?.id ?? null,
+      actionType: 'USER_IMPERSONATE',
+      entityType: 'user',
+      entityId: Number(target.id),
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+      method: ctx.method,
+      path: ctx.path,
+      statusCode: 200,
+      metadata: { target_role: String(target.role ?? '') },
+    });
+
+    return res.json({
+      token,
+      user: { id: Number(target.id), name: target.name, email: target.email, role: target.role },
+    });
   } catch (err) {
     return next(err);
   }
@@ -83,6 +134,36 @@ export async function listEnrollments(req, res, next) {
         LIMIT 500`,
     );
     return res.json({ enrollments: rows });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+const enrollmentPatchSchema = z.object({
+  expiry_date: z.string().date().optional().nullable(),
+  status: z.enum(['active', 'revoked', 'expired', 'waitlisted']).optional().nullable(),
+});
+
+export async function patchEnrollment(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: { message: 'Invalid enrollment id' } });
+    const payload = enrollmentPatchSchema.parse(req.body ?? {});
+    const fields = [];
+    const values = [];
+    if (payload.expiry_date !== undefined) {
+      fields.push('expiry_date = ?');
+      values.push(payload.expiry_date ?? null);
+    }
+    if (payload.status !== undefined && payload.status != null) {
+      fields.push('status = ?');
+      values.push(payload.status);
+    }
+    if (!fields.length) return res.json({ ok: true });
+    values.push(id);
+    const [res2] = await pool.query(`UPDATE enrollments SET ${fields.join(', ')} WHERE id = ?`, values);
+    if (!Number(res2?.affectedRows ?? 0)) return res.status(404).json({ error: { message: 'Enrollment not found' } });
+    return res.json({ ok: true });
   } catch (err) {
     return next(err);
   }

@@ -40,7 +40,7 @@ export async function createCheckoutOrder(req, res, next) {
     await assertNotAlreadyEnrolled({ userId, courseIds });
 
     const couponCode = payload.coupon_code ? String(payload.coupon_code).trim().toUpperCase() : null;
-    const quote = await computeCheckout({ userId, items: payload.items, couponCode });
+    const quote = await computeCheckout({ userId, items: payload.items, couponCode, currency: payload.currency ?? null });
 
     const billing = payload.billing ?? null;
     const orderId = await withTransaction(async (conn) => {

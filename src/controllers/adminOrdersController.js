@@ -6,6 +6,7 @@ import { createPayment, listPaymentsForOrder, markPaymentCaptured } from '../mod
 import { fulfillPaidOrder } from '../services/payments/orderFulfillment.js';
 import { getRequestAuditContext, logAuditEvent } from '../services/auditLogService.js';
 import { createRazorpayRefund } from '../services/payments/razorpayRefundClient.js';
+import { fetchRazorpayPayment } from '../services/payments/razorpayPaymentsClient.js';
 
 const listSchema = z.object({
   status: z.string().optional().nullable(),
@@ -262,6 +263,55 @@ export async function adminRefundOrder(req, res, next) {
     });
 
     return res.json({ ok: true, provider_refund: providerRefund ? { id: providerRefund.id, status: providerRefund.status } : null });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+export async function adminReconcileOrder(req, res, next) {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: { message: 'Invalid order id' } });
+
+    const [[order]] = await pool.query('SELECT id, total_cents, currency, status FROM orders WHERE id = ? LIMIT 1', [id]);
+    if (!order) return res.status(404).json({ error: { message: 'Order not found' } });
+
+    const [[payment]] = await pool.query(
+      `SELECT id, provider, status, provider_payment_id, amount_cents, currency
+         FROM payments
+        WHERE order_id = ?
+     ORDER BY id DESC
+        LIMIT 1`,
+      [id],
+    );
+    if (!payment) return res.status(400).json({ error: { message: 'Payment not found for order' } });
+    if (String(payment.provider) !== 'razorpay') return res.status(400).json({ error: { message: 'Only Razorpay reconciliation is supported' } });
+    if (!payment.provider_payment_id) return res.status(400).json({ error: { message: 'Missing provider payment id' } });
+
+    const provider = await fetchRazorpayPayment({ providerPaymentId: String(payment.provider_payment_id) });
+    const providerStatus = String(provider?.status ?? '');
+    const providerAmount = Number(provider?.amount ?? 0);
+    const expected = Number(payment.amount_cents ?? order.total_cents ?? 0);
+
+    let reconStatus = 'needs_review';
+    const notes = {
+      provider_status: providerStatus,
+      provider_amount: providerAmount,
+      expected_amount: expected,
+      payment_status: String(payment.status ?? ''),
+      order_status: String(order.status ?? ''),
+    };
+    if (providerStatus === 'captured' && Number(providerAmount) === Number(expected)) reconStatus = 'reconciled';
+    if (providerStatus === 'failed') reconStatus = 'needs_review';
+
+    await pool.query(
+      `INSERT INTO payment_reconciliation (order_id, status, notes)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE status = VALUES(status), notes = VALUES(notes), updated_at = CURRENT_TIMESTAMP`,
+      [id, reconStatus, JSON.stringify(notes)],
+    );
+
+    return res.json({ ok: true, status: reconStatus, provider: { status: providerStatus, amount: providerAmount } });
   } catch (err) {
     return next(err);
   }

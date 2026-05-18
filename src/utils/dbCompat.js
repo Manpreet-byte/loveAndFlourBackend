@@ -662,6 +662,34 @@ export async function ensureCommerceTables({ pool }) {
       }
     }
   }
+
+  // course_prices: sale / compare-at upgrades (non-breaking).
+  try {
+    if (await tableExists({ pool, tableName: 'course_prices' })) {
+      const upgrades = [
+        { name: 'compare_at_amount_cents', ddl: 'ALTER TABLE course_prices ADD COLUMN compare_at_amount_cents INT UNSIGNED NULL AFTER amount_cents' },
+        { name: 'sale_amount_cents', ddl: 'ALTER TABLE course_prices ADD COLUMN sale_amount_cents INT UNSIGNED NULL AFTER compare_at_amount_cents' },
+        { name: 'sale_starts_at', ddl: 'ALTER TABLE course_prices ADD COLUMN sale_starts_at DATETIME NULL AFTER sale_amount_cents' },
+        { name: 'sale_ends_at', ddl: 'ALTER TABLE course_prices ADD COLUMN sale_ends_at DATETIME NULL AFTER sale_starts_at' },
+      ];
+      for (const u of upgrades) {
+        // eslint-disable-next-line no-await-in-loop
+        const exists = await columnExists({ pool, tableName: 'course_prices', columnName: u.name });
+        if (exists) continue;
+        logger.warn({ table: 'course_prices', column: u.name }, 'db_compat_course_prices_upgrade');
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await pool.query(u.ddl);
+          logger.info({ table: 'course_prices', column: u.name }, 'db_compat_course_prices_column_added');
+        } catch (err) {
+          if (err?.code === 'ER_DUP_FIELDNAME') continue;
+          throw err;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'db_compat_course_prices_upgrade_failed');
+  }
 }
 
 /**
@@ -725,6 +753,24 @@ export async function ensureUserExperienceTables({ pool }) {
           ON DELETE CASCADE ON UPDATE CASCADE,
         CONSTRAINT fk_offline_progress_events_lesson_id
           FOREIGN KEY (lesson_id) REFERENCES lessons(id)
+          ON DELETE CASCADE ON UPDATE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+    },
+    {
+      name: 'waitlist_signups',
+      ddl: `CREATE TABLE IF NOT EXISTS waitlist_signups (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        user_id INT UNSIGNED NOT NULL,
+        course_id BIGINT UNSIGNED NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_waitlist_user_course (user_id, course_id),
+        KEY idx_waitlist_course_created (course_id, created_at),
+        CONSTRAINT fk_waitlist_user_id
+          FOREIGN KEY (user_id) REFERENCES users(id)
+          ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT fk_waitlist_course_id
+          FOREIGN KEY (course_id) REFERENCES courses(id)
           ON DELETE CASCADE ON UPDATE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
     },
@@ -967,6 +1013,66 @@ export async function ensureCmsTables({ pool }) {
       throw err;
     }
   }
+
+  // Recipes: scheduled publish support (column upgrade).
+  try {
+    if (await tableExists({ pool, tableName: 'recipes' })) {
+      const exists = await columnExists({ pool, tableName: 'recipes', columnName: 'publish_at' });
+      if (!exists) {
+        logger.warn({ table: 'recipes', column: 'publish_at' }, 'db_compat_recipes_upgrade');
+        await pool.query('ALTER TABLE recipes ADD COLUMN publish_at DATETIME NULL AFTER is_published');
+        logger.info({ table: 'recipes', column: 'publish_at' }, 'db_compat_recipes_column_added');
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'db_compat_recipes_publish_at_upgrade_failed');
+  }
+
+  // Tags (recipes).
+  try {
+    const tagTables = [
+      {
+        name: 'tags',
+        ddl: `CREATE TABLE IF NOT EXISTS tags (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+          tag_type ENUM('recipe') NOT NULL DEFAULT 'recipe',
+          name VARCHAR(120) NOT NULL,
+          slug VARCHAR(140) NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          UNIQUE KEY uk_tags_type_slug (tag_type, slug),
+          KEY idx_tags_type_name (tag_type, name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      },
+      {
+        name: 'recipe_tags',
+        ddl: `CREATE TABLE IF NOT EXISTS recipe_tags (
+          recipe_id BIGINT UNSIGNED NOT NULL,
+          tag_id BIGINT UNSIGNED NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (recipe_id, tag_id),
+          KEY idx_recipe_tags_tag_id (tag_id),
+          CONSTRAINT fk_recipe_tags_recipe_id
+            FOREIGN KEY (recipe_id) REFERENCES recipes(id)
+            ON DELETE CASCADE ON UPDATE CASCADE,
+          CONSTRAINT fk_recipe_tags_tag_id
+            FOREIGN KEY (tag_id) REFERENCES tags(id)
+            ON DELETE CASCADE ON UPDATE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      },
+    ];
+    for (const t of tagTables) {
+      // eslint-disable-next-line no-await-in-loop
+      const exists = await tableExists({ pool, tableName: t.name });
+      if (exists) continue;
+      logger.warn({ table: t.name, db: env.DB_NAME }, 'db_compat_table_missing');
+      // eslint-disable-next-line no-await-in-loop
+      await pool.query(t.ddl);
+      logger.info({ table: t.name }, 'db_compat_table_created');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'db_compat_tags_tables_failed');
+  }
 }
 
 /**
@@ -1107,6 +1213,31 @@ export async function ensureLmsCoreTables({ pool }) {
       logger.error({ err, table: t.name }, 'db_compat_table_create_failed');
       throw err;
     }
+  }
+
+  // Column upgrades for existing courses table.
+  // Q&A toggle (default enabled). When disabled, student Q&A endpoints return 403.
+  try {
+    const qaExists = await columnExists({ pool, tableName: 'courses', columnName: 'qa_enabled' });
+    if (!qaExists) {
+      logger.warn({ table: 'courses', column: 'qa_enabled' }, 'db_compat_courses_upgrade');
+      await pool.query("ALTER TABLE courses ADD COLUMN qa_enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER language");
+      logger.info({ table: 'courses', column: 'qa_enabled' }, 'db_compat_courses_column_added');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'db_compat_courses_upgrade_failed');
+  }
+
+  // Scheduled publish support.
+  try {
+    const publishAtExists = await columnExists({ pool, tableName: 'courses', columnName: 'publish_at' });
+    if (!publishAtExists) {
+      logger.warn({ table: 'courses', column: 'publish_at' }, 'db_compat_courses_upgrade');
+      await pool.query('ALTER TABLE courses ADD COLUMN publish_at DATETIME NULL AFTER qa_enabled');
+      logger.info({ table: 'courses', column: 'publish_at' }, 'db_compat_courses_column_added');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'db_compat_courses_publish_at_upgrade_failed');
   }
 }
 

@@ -10,17 +10,20 @@ const createRecipeSchema = z.object({
   content: z.string().optional().nullable(),
   featured_image_url: z.string().url().max(1024).optional().nullable(),
   category_ids: z.array(z.coerce.number().int().positive()).default([]),
+  tag_ids: z.array(z.coerce.number().int().positive()).default([]),
   is_published: z.coerce.boolean().optional().default(false),
+  publish_at: z.string().datetime().optional().nullable(),
 });
 
 export async function createRecipe(req, res, next) {
   try {
     const payload = createRecipeSchema.parse(req.body);
     const slug = slugify(payload.title);
+    const publishAt = payload.publish_at ? new Date(String(payload.publish_at)) : null;
     const publishedAt = payload.is_published ? new Date() : null;
 
     const [result] = await pool.query(
-      'INSERT INTO recipes (title, slug, summary, content, featured_image_url, is_published, published_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO recipes (title, slug, summary, content, featured_image_url, is_published, publish_at, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [
         payload.title,
         slug,
@@ -28,6 +31,7 @@ export async function createRecipe(req, res, next) {
         payload.content ?? null,
         payload.featured_image_url ?? null,
         payload.is_published ? 1 : 0,
+        payload.is_published ? null : publishAt,
         publishedAt,
       ],
     );
@@ -36,6 +40,11 @@ export async function createRecipe(req, res, next) {
     if (payload.category_ids?.length) {
       const values = payload.category_ids.map((cid) => [recipeId, cid]);
       await pool.query('INSERT IGNORE INTO recipe_categories (recipe_id, category_id) VALUES ?', [values]);
+    }
+
+    if (payload.tag_ids?.length) {
+      const values = payload.tag_ids.map((tid) => [recipeId, tid]);
+      await pool.query('INSERT IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES ?', [values]);
     }
 
     await invalidatePublicRecipes();
@@ -78,7 +87,7 @@ export async function listRecipes(req, res, next) {
              ${whereSql}
          ORDER BY r.created_at DESC
             LIMIT 200`
-        : `SELECT r.id, r.title, r.slug, r.summary, r.featured_image_url, r.is_published, r.published_at, r.created_at
+        : `SELECT r.id, r.title, r.slug, r.summary, r.featured_image_url, r.is_published, r.publish_at, r.published_at, r.created_at
              FROM recipes r
              ${whereSql}
          ORDER BY r.created_at DESC
@@ -86,7 +95,48 @@ export async function listRecipes(req, res, next) {
       args,
     );
 
-    return res.json({ recipes: rows });
+    const list = rows ?? [];
+    if (!list.length) return res.json({ recipes: [] });
+
+    const ids = list.map((r) => Number(r.id)).filter((n) => Number.isFinite(n) && n > 0);
+    const [catRows] = await pool.query(
+      `SELECT recipe_id, GROUP_CONCAT(category_id ORDER BY category_id ASC) AS category_ids
+         FROM recipe_categories
+        WHERE recipe_id IN (?)
+     GROUP BY recipe_id`,
+      [ids],
+    );
+    const catsByRecipe = new Map();
+    for (const r of catRows ?? []) {
+      const arr = String(r.category_ids ?? '')
+        .split(',')
+        .map((v) => Number(v))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      catsByRecipe.set(Number(r.recipe_id), arr);
+    }
+
+    const [tagRows] = await pool.query(
+      `SELECT rt.recipe_id, GROUP_CONCAT(rt.tag_id ORDER BY rt.tag_id ASC) AS tag_ids
+         FROM recipe_tags rt
+        WHERE rt.recipe_id IN (?)
+     GROUP BY rt.recipe_id`,
+      [ids],
+    );
+    const tagsByRecipe = new Map();
+    for (const r of tagRows ?? []) {
+      const arr = String(r.tag_ids ?? '')
+        .split(',')
+        .map((v) => Number(v))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      tagsByRecipe.set(Number(r.recipe_id), arr);
+    }
+
+    const decorated = list.map((r) => ({
+      ...r,
+      category_ids: catsByRecipe.get(Number(r.id)) ?? [],
+      tag_ids: tagsByRecipe.get(Number(r.id)) ?? [],
+    }));
+    return res.json({ recipes: decorated });
   } catch (err) {
     return next(err);
   }
@@ -117,8 +167,9 @@ export async function updateRecipe(req, res, next) {
       push('is_published', payload.is_published ? 1 : 0);
       push('published_at', payload.is_published ? new Date() : null);
     }
+    if (payload.publish_at !== undefined) push('publish_at', payload.publish_at ? new Date(String(payload.publish_at)) : null);
 
-    if (!fields.length && !Array.isArray(payload.category_ids)) return res.json({ ok: true });
+    if (!fields.length && !Array.isArray(payload.category_ids) && !Array.isArray(payload.tag_ids)) return res.json({ ok: true });
 
     const [result] = fields.length
       ? await pool.query(`UPDATE recipes SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [...values, id])
@@ -130,6 +181,14 @@ export async function updateRecipe(req, res, next) {
       if (payload.category_ids.length) {
         const values = payload.category_ids.map((cid) => [id, cid]);
         await pool.query('INSERT IGNORE INTO recipe_categories (recipe_id, category_id) VALUES ?', [values]);
+      }
+    }
+
+    if (Array.isArray(payload.tag_ids)) {
+      await pool.query('DELETE FROM recipe_tags WHERE recipe_id = ?', [id]);
+      if (payload.tag_ids.length) {
+        const values = payload.tag_ids.map((tid) => [id, tid]);
+        await pool.query('INSERT IGNORE INTO recipe_tags (recipe_id, tag_id) VALUES ?', [values]);
       }
     }
 

@@ -1,12 +1,14 @@
 import { processOutboxBatch } from '../services/emailOutbox.js';
 import { processLiveSessionReminders, REMINDER_TYPES } from '../services/sessionReminders.js';
 import { processPushOutboxBatch } from '../services/push/pushOutboxService.js';
+import { publishDueContent } from '../services/scheduledPublishService.js';
 import { logger } from '../utils/logger.js';
 import { workerErrorsTotal, workerLoopDurationMs } from '../services/metricsService.js';
 
 let timer;
 let reminderTimer;
 let pushTimer;
+let publishTimer;
 
 export function startWorker() {
   if (timer) return;
@@ -63,6 +65,20 @@ export function startWorker() {
         logger.error({ err }, 'worker_reminder_1h_error');
       });
   }, 60_000);
+
+  publishTimer = setInterval(() => {
+    const start = process.hrtime.bigint();
+    publishDueContent({ limit: 200 })
+      .then(() => {
+        const ms = Number(process.hrtime.bigint() - start) / 1e6;
+        workerLoopDurationMs.observe({ job: 'scheduled_publish' }, ms);
+        globalThis.__worker_last_heartbeat = Date.now();
+      })
+      .catch((err) => {
+        workerErrorsTotal.inc({ job: 'scheduled_publish' });
+        logger.error({ err }, 'worker_scheduled_publish_error');
+      });
+  }, 60_000);
 }
 
 export function stopWorker() {
@@ -77,5 +93,9 @@ export function stopWorker() {
   if (pushTimer) {
     clearInterval(pushTimer);
     pushTimer = undefined;
+  }
+  if (publishTimer) {
+    clearInterval(publishTimer);
+    publishTimer = undefined;
   }
 }

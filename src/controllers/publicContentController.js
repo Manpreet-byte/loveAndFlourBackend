@@ -1,5 +1,6 @@
 import { pool } from '../config/db.js';
 import { cacheWrap } from '../services/cacheService.js';
+import { computeEffectivePriceCents, getDefaultCurrency } from '../services/pricingService.js';
 
 const IMPORT_SOURCE = 'loveandflourbypooja';
 
@@ -11,7 +12,12 @@ function splitTaxonomyRows(rows, key) {
 
 function mapCourseRow(row) {
   const categories = splitTaxonomyRows(row.category_rows ?? [], 'course');
-  const priceText = row.amount_cents && row.currency ? `${row.currency} ${(row.amount_cents / 100).toFixed(0)}` : '';
+  const effectiveCents = row.amount_cents && row.currency ? computeEffectivePriceCents(row) : 0;
+  const priceText = effectiveCents && row.currency ? `${row.currency} ${(effectiveCents / 100).toFixed(0)}` : '';
+  const compareAtPriceText =
+    row.compare_at_amount_cents && row.currency && Number(row.compare_at_amount_cents) > Number(effectiveCents)
+      ? `${row.currency} ${(Number(row.compare_at_amount_cents) / 100).toFixed(0)}`
+      : '';
   const contentHtml = row.content ?? row.summary ?? '';
   const excerptHtml = row.summary ?? (row.content ? String(row.content).slice(0, 220) : '');
 
@@ -26,8 +32,9 @@ function mapCourseRow(row) {
     date: row.published_at ?? row.created_at,
     priceText,
     currency: row.currency ?? null,
-    amount_cents: row.amount_cents != null ? Number(row.amount_cents) : null,
-    compareAtPriceText: '',
+    amount_cents: effectiveCents ? Number(effectiveCents) : row.amount_cents != null ? Number(row.amount_cents) : null,
+    compareAtPriceText,
+    qa_enabled: row.qa_enabled != null ? Boolean(row.qa_enabled) : true,
     taxonomies: {
       'course-category': categories,
     },
@@ -36,6 +43,7 @@ function mapCourseRow(row) {
 
 function mapRecipeRow(row) {
   const categories = splitTaxonomyRows(row.category_rows ?? [], 'category');
+  const tags = splitTaxonomyRows(row.tag_rows ?? [], 'tag');
   return {
     id: row.id,
     slug: row.slug,
@@ -45,6 +53,7 @@ function mapRecipeRow(row) {
     excerptHtml: row.summary ?? (row.content ? String(row.content).slice(0, 220) : ''),
     contentHtml: row.content ?? '',
     date: row.published_at ?? row.created_at,
+    tags,
     taxonomies: {
       category: categories,
     },
@@ -53,20 +62,22 @@ function mapRecipeRow(row) {
 
 export async function listPublicCourses(_req, res, next) {
   try {
+    const currency = String(_req.query?.currency ?? '').trim().toUpperCase();
+    const selectedCurrency = currency && currency.length === 3 ? currency : await getDefaultCurrency();
     const payload = await cacheWrap({
       ns: 'public_courses',
-      key: 'list:v1:kind:workshop:source:loveandflour',
+      key: `list:v1:kind:workshop:source:loveandflour:cur:${selectedCurrency}`,
       ttlSeconds: 120,
       compute: async () => {
         const [rows] = await pool.query(
           `SELECT c.id, c.title, c.slug, c.summary, c.content, c.featured_image_url, c.published_at, c.created_at,
-                  cp.currency, cp.amount_cents
+                  c.qa_enabled, cp.currency, cp.amount_cents, cp.compare_at_amount_cents, cp.sale_amount_cents, cp.sale_starts_at, cp.sale_ends_at
              FROM courses c
-        LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
-            WHERE c.is_published = 1 AND c.kind = 'workshop' AND c.source = ?
+        LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1 AND cp.currency = ?
+            WHERE c.is_published = 1 AND c.kind = 'workshop' AND (c.source = ? OR c.source = 'local')
           ORDER BY COALESCE(c.published_at, c.created_at) DESC
             LIMIT 200`,
-          [IMPORT_SOURCE],
+          [selectedCurrency, IMPORT_SOURCE],
         );
 
         if (!rows.length) return { courses: [] };
@@ -101,19 +112,21 @@ export async function listPublicCourses(_req, res, next) {
 export async function getPublicCourseBySlug(req, res, next) {
   try {
     const slug = String(req.params.slug ?? '').trim();
+    const currency = String(req.query?.currency ?? '').trim().toUpperCase();
+    const selectedCurrency = currency && currency.length === 3 ? currency : await getDefaultCurrency();
     const payload = await cacheWrap({
       ns: 'public_course_detail',
-      key: `slug:${slug}:kind:workshop:source:loveandflour`,
+      key: `slug:${slug}:kind:workshop:source:loveandflour:cur:${selectedCurrency}`,
       ttlSeconds: 300,
       compute: async () => {
         const [rows] = await pool.query(
           `SELECT c.id, c.title, c.slug, c.summary, c.content, c.featured_image_url, c.published_at, c.created_at,
-                  cp.currency, cp.amount_cents
+                  c.qa_enabled, cp.currency, cp.amount_cents, cp.compare_at_amount_cents, cp.sale_amount_cents, cp.sale_starts_at, cp.sale_ends_at
              FROM courses c
-        LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
-            WHERE c.slug = ? AND c.is_published = 1 AND c.kind = 'workshop' AND c.source = ?
+        LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1 AND cp.currency = ?
+            WHERE c.slug = ? AND c.is_published = 1 AND c.kind = 'workshop' AND (c.source = ? OR c.source = 'local')
          LIMIT 1`,
-          [slug, IMPORT_SOURCE],
+          [selectedCurrency, slug, IMPORT_SOURCE],
         );
         const row = rows?.[0];
         if (!row) return null;
@@ -139,20 +152,22 @@ export async function getPublicCourseBySlug(req, res, next) {
 
 export async function listPublicWorkshops(_req, res, next) {
   try {
+    const currency = String(_req.query?.currency ?? '').trim().toUpperCase();
+    const selectedCurrency = currency && currency.length === 3 ? currency : await getDefaultCurrency();
     const payload = await cacheWrap({
       ns: 'public_courses',
-      key: 'list:v1:kind:workshop',
+      key: `list:v1:kind:workshop:cur:${selectedCurrency}`,
       ttlSeconds: 120,
       compute: async () => {
         const [rows] = await pool.query(
           `SELECT c.id, c.title, c.slug, c.summary, c.content, c.featured_image_url, c.published_at, c.created_at,
-                  cp.currency, cp.amount_cents
+                  c.qa_enabled, cp.currency, cp.amount_cents, cp.compare_at_amount_cents, cp.sale_amount_cents, cp.sale_starts_at, cp.sale_ends_at
              FROM courses c
-        LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
-            WHERE c.is_published = 1 AND c.kind = 'workshop' AND c.source = ?
+        LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1 AND cp.currency = ?
+            WHERE c.is_published = 1 AND c.kind = 'workshop' AND (c.source = ? OR c.source = 'local')
           ORDER BY COALESCE(c.published_at, c.created_at) DESC
             LIMIT 200`,
-          [IMPORT_SOURCE],
+          [selectedCurrency, IMPORT_SOURCE],
         );
 
         if (!rows.length) return { workshops: [] };
@@ -187,19 +202,21 @@ export async function listPublicWorkshops(_req, res, next) {
 export async function getPublicWorkshopBySlug(req, res, next) {
   try {
     const slug = String(req.params.slug ?? '').trim();
+    const currency = String(req.query?.currency ?? '').trim().toUpperCase();
+    const selectedCurrency = currency && currency.length === 3 ? currency : await getDefaultCurrency();
     const payload = await cacheWrap({
       ns: 'public_course_detail',
-      key: `slug:${slug}:kind:workshop`,
+      key: `slug:${slug}:kind:workshop:cur:${selectedCurrency}`,
       ttlSeconds: 300,
       compute: async () => {
         const [rows] = await pool.query(
           `SELECT c.id, c.title, c.slug, c.summary, c.content, c.featured_image_url, c.published_at, c.created_at,
-                  cp.currency, cp.amount_cents
+                  c.qa_enabled, cp.currency, cp.amount_cents, cp.compare_at_amount_cents, cp.sale_amount_cents, cp.sale_starts_at, cp.sale_ends_at
              FROM courses c
-        LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1
-            WHERE c.slug = ? AND c.is_published = 1 AND c.kind = 'workshop' AND c.source = ?
+        LEFT JOIN course_prices cp ON cp.course_id = c.id AND cp.is_active = 1 AND cp.currency = ?
+            WHERE c.slug = ? AND c.is_published = 1 AND c.kind = 'workshop' AND (c.source = ? OR c.source = 'local')
          LIMIT 1`,
-          [slug, IMPORT_SOURCE],
+          [selectedCurrency, slug, IMPORT_SOURCE],
         );
         const row = rows?.[0];
         if (!row) return null;
@@ -233,7 +250,7 @@ export async function listPublicRecipes(_req, res, next) {
         const [rows] = await pool.query(
           `SELECT r.id, r.title, r.slug, r.summary, r.content, r.featured_image_url, r.published_at, r.created_at
              FROM recipes r
-            WHERE r.is_published = 1 AND r.source = ?
+            WHERE r.is_published = 1 AND (r.source = ? OR r.source = 'local')
          ORDER BY COALESCE(r.published_at, r.created_at) DESC
             LIMIT 200`,
           [IMPORT_SOURCE],
@@ -257,7 +274,23 @@ export async function listPublicRecipes(_req, res, next) {
           byRecipe.set(r.recipe_id, list);
         }
 
-        const decorated = rows.map((row) => mapRecipeRow({ ...row, category_rows: byRecipe.get(row.id) ?? [] }));
+        const [tagRows] = await pool.query(
+          `SELECT rt.recipe_id,
+                  t.id AS tag_id, t.slug AS tag_slug, t.name AS tag_name
+             FROM recipe_tags rt
+             JOIN tags t ON t.id = rt.tag_id
+            WHERE rt.recipe_id IN (?) AND t.tag_type = 'recipe'
+         ORDER BY t.name ASC`,
+          [ids],
+        );
+        const tagsByRecipe = new Map();
+        for (const r of tagRows) {
+          const list = tagsByRecipe.get(r.recipe_id) ?? [];
+          list.push({ tag_id: r.tag_id, tag_slug: r.tag_slug, tag_name: r.tag_name });
+          tagsByRecipe.set(r.recipe_id, list);
+        }
+
+        const decorated = rows.map((row) => mapRecipeRow({ ...row, category_rows: byRecipe.get(row.id) ?? [], tag_rows: tagsByRecipe.get(row.id) ?? [] }));
         return { recipes: decorated };
       },
     });
@@ -279,7 +312,7 @@ export async function getPublicRecipeBySlug(req, res, next) {
         const [rows] = await pool.query(
           `SELECT r.id, r.title, r.slug, r.summary, r.content, r.featured_image_url, r.published_at, r.created_at
              FROM recipes r
-            WHERE r.slug = ? AND r.is_published = 1 AND r.source = ?
+            WHERE r.slug = ? AND r.is_published = 1 AND (r.source = ? OR r.source = 'local')
          LIMIT 1`,
           [slug, IMPORT_SOURCE],
         );
@@ -294,7 +327,15 @@ export async function getPublicRecipeBySlug(req, res, next) {
          ORDER BY cat.name ASC`,
           [row.id],
         );
-        return { recipe: mapRecipeRow({ ...row, category_rows: categoryRows }) };
+        const [tagRows] = await pool.query(
+          `SELECT t.id AS tag_id, t.slug AS tag_slug, t.name AS tag_name
+             FROM recipe_tags rt
+             JOIN tags t ON t.id = rt.tag_id
+            WHERE rt.recipe_id = ? AND t.tag_type = 'recipe'
+         ORDER BY t.name ASC`,
+          [row.id],
+        );
+        return { recipe: mapRecipeRow({ ...row, category_rows: categoryRows, tag_rows: tagRows }) };
       },
     });
 

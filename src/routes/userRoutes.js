@@ -16,6 +16,7 @@ import { listNotifications, readAll, readNotification } from '../controllers/use
 import { getMyPreferences, patchMyPreferences } from '../controllers/userPreferencesController.js';
 import { offlineProgressSync, offlineSync } from '../controllers/offlineSyncController.js';
 import { getLiveSessionAccess } from '../controllers/liveSessionAccessController.js';
+import { joinWaitlist } from '../controllers/waitlistController.js';
 
 const router = Router();
 
@@ -43,6 +44,7 @@ router.get('/recordings', authenticateUser, myRecordings);
 
 // Live session access (join + replay)
 router.get('/live-sessions/:id/access', authenticateUser, getLiveSessionAccess);
+router.post('/waitlist', authenticateUser, joinWaitlist);
 
 // In-app notifications
 router.get('/notifications', authenticateUser, listNotifications);
