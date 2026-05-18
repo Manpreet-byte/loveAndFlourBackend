@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticateUser } from '../middlewares/authMiddleware.js';
 import { authorizeRoles } from '../middlewares/roleMiddleware.js';
-import { bootstrapAdmin, createAdmin, promoteAdmin } from '../controllers/adminController.js';
+import { bootstrapAdmin, bootstrapSuperAdmin, createAdmin, promoteAdmin } from '../controllers/adminController.js';
 import { bootstrapLimiter } from '../middleware/rateLimiters.js';
 import { createCourse, deleteCourse, listCourses, updateCourse } from '../controllers/courseAdminController.js';
 import { createCategory, deleteCategory, listCategories } from '../controllers/categoryAdminController.js';
@@ -45,11 +45,13 @@ import { adminEmailOutboxStats, adminListEmailOutbox, adminResendEmailOutbox } f
 import { adminImportLoveAndFlour } from '../controllers/importLoveAndFlourController.js';
 import { adminPreviewLoveAndFlour } from '../controllers/importLoveAndFlourPreviewController.js';
 import { adminGetRazorpayConfig, adminPatchRazorpayConfig } from '../controllers/adminRazorpayConfigController.js';
+import { superListAdmins, superResetAdminPassword, superRevokeAdmin, superTransferSuperAdmin } from '../controllers/superAdminController.js';
 
 const router = Router();
 
 // One-time bootstrap to create the first admin (requires ADMIN_BOOTSTRAP_SECRET).
 router.post('/bootstrap', bootstrapLimiter, bootstrapAdmin);
+router.post('/bootstrap/super-admin', bootstrapLimiter, bootstrapSuperAdmin);
 router.post('/bootstrap/promote', bootstrapLimiter, promoteAdmin);
 
 // Everything below is admin-only.
@@ -59,6 +61,12 @@ router.use(adminLimiter);
 
 // Admins can create other admins.
 router.post('/admins', createAdmin);
+
+// Super admin controls (manage admins, reset password, transfer ownership).
+router.get('/super/admins', authorizeRoles('super_admin'), superListAdmins);
+router.delete('/super/admins/:id', authorizeRoles('super_admin'), superRevokeAdmin);
+router.post('/super/admins/:id/reset-password', authorizeRoles('super_admin'), superResetAdminPassword);
+router.post('/super/transfer-super-admin', authorizeRoles('super_admin'), superTransferSuperAdmin);
 
 // Instructors / team
 router.get('/instructors', adminListInstructors);

@@ -62,6 +62,50 @@ export async function bootstrapAdmin(req, res, next) {
   }
 }
 
+// One-time bootstrap to create the first super admin (requires ADMIN_BOOTSTRAP_SECRET).
+export async function bootstrapSuperAdmin(req, res, next) {
+  try {
+    if (!env.ADMIN_BOOTSTRAP_ENABLED) {
+      return res.status(404).json({ error: { message: 'Not Found' } });
+    }
+
+    if (!env.ADMIN_BOOTSTRAP_SECRET) {
+      return res.status(400).json({ error: { message: 'ADMIN_BOOTSTRAP_SECRET is not configured on server' } });
+    }
+
+    const { secret, name, email, password } = bootstrapSchema.parse(req.body);
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    if (!safeEqual(secret, env.ADMIN_BOOTSTRAP_SECRET)) {
+      return res.status(401).json({ error: { message: 'Invalid bootstrap secret' } });
+    }
+
+    const [existingSupers] = await pool.query('SELECT id FROM users WHERE role = ? LIMIT 1', ['super_admin']);
+    if (existingSupers?.length) {
+      return res.status(409).json({ error: { message: 'A super admin already exists' } });
+    }
+
+    const [existingEmail] = await pool.query('SELECT id FROM users WHERE email = ? LIMIT 1', [normalizedEmail]);
+    if (existingEmail?.length) {
+      return res.status(409).json({ error: { message: 'Email already in use' } });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const [result] = await pool.query('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)', [
+      name,
+      normalizedEmail,
+      passwordHash,
+      'super_admin',
+    ]);
+
+    const user = { id: result.insertId, name, email: normalizedEmail, role: 'super_admin', token_version: 0 };
+    const token = signAccessToken({ userId: user.id, role: user.role, tokenVersion: user.token_version });
+    return res.status(201).json({ user, token });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 const createAdminSchema = z.object({
   name: z.string().min(1).max(150),
   email: z.string().email().max(254),

@@ -12,12 +12,7 @@ export async function invalidatePublicRecipes() {
   await bumpNamespace('search_suggestions');
 }
 
-export async function invalidateHomepageContent() {
-  await bumpNamespace('cms_homepage');
-}
-
 export async function invalidateCategories() {
   await bumpNamespace('public_categories');
   await bumpNamespace('search_suggestions');
 }
-

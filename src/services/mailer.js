@@ -84,7 +84,7 @@ async function getTransporter() {
   return transporter;
 }
 
-export async function sendEmail({ to, subject, text, html }) {
+export async function sendEmail({ to, subject, text, html, replyTo }) {
   const tx = await getTransporter();
   if (!tx) {
     logger.info({ to, subject }, 'email_skipped_smtp_not_configured');
@@ -104,6 +104,7 @@ export async function sendEmail({ to, subject, text, html }) {
   const info = await tx.sendMail({
     from: env.SMTP_FROM_NAME ? { name: env.SMTP_FROM_NAME, address: env.SMTP_FROM_EMAIL } : env.SMTP_FROM_EMAIL,
     to,
+    replyTo: replyTo ?? undefined,
     subject,
     text: text ?? undefined,
     html: html ?? undefined,

@@ -9,6 +9,7 @@ import {
   listPublicWorkshops,
 } from '../controllers/publicContentController.js';
 import { getPublicLiveSessionBySlug, listPublicLiveSessions } from '../controllers/liveSessionPublicController.js';
+import { sendContactMessage } from '../controllers/contactController.js';
 
 const router = Router();
 
@@ -21,5 +22,6 @@ router.get('/recipes/:slug', getPublicRecipeBySlug);
 router.get('/categories', listPublicCategories);
 router.get('/live-sessions', listPublicLiveSessions);
 router.get('/live-sessions/:slug', getPublicLiveSessionBySlug);
+router.post('/contact', sendContactMessage);
 
 export default router;

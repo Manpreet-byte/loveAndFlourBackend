@@ -68,6 +68,10 @@ const schema = z.object({
       return v === 'true' || v === '1';
     }),
 
+  // Contact form delivery
+  CONTACT_TO_EMAIL: z.string().optional().default('contact@loveandflourbypooja.com'),
+  CONTACT_SUBJECT_PREFIX: z.string().optional().default('[Contact]'),
+
   PUBLIC_WEB_BASE_URL: z.string().min(1).default('http://localhost:5173'),
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional().default(''),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional().default(''),

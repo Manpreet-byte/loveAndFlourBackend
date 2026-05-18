@@ -70,9 +70,16 @@ const patchSchema = z.object({
 export async function adminPatchInstructor(req, res, next) {
   try {
     const adminId = req.user.id;
+    const actorRole = String(req.user?.role ?? '');
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: { message: 'Invalid user id' } });
     const payload = patchSchema.parse(req.body ?? {});
+
+    if (payload.role === 'admin' || payload.role === 'super_admin') {
+      if (actorRole !== 'super_admin') {
+        return res.status(403).json({ error: { message: 'Forbidden' } });
+      }
+    }
 
     const fields = [];
     const values = [];
@@ -104,4 +111,3 @@ export async function adminPatchInstructor(req, res, next) {
     return next(err);
   }
 }
-
