@@ -90,7 +90,9 @@ const schema = z.object({
 
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
   AUTH_REFRESH_COOKIE_NAME: z.string().min(1).default('refresh_token'),
-  AUTH_COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
+  // IMPORTANT: If your frontend and backend are on different domains, refresh cookies must use SameSite=None.
+  // We default to `none` in production (override via env) and `lax` in development.
+  AUTH_COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).optional(),
   COOKIE_DOMAIN: z.string().optional().default(''),
   COOKIE_SECURE: z
     .string()
@@ -193,6 +195,7 @@ export const env = {
   ...parsed,
   JWT_ACCESS_SECRET: parsed.JWT_ACCESS_SECRET || parsed.JWT_SECRET,
   ADMIN_BOOTSTRAP_ENABLED: parsed.ADMIN_BOOTSTRAP_ENABLED ?? (isProd ? false : true),
+  AUTH_COOKIE_SAMESITE: parsed.AUTH_COOKIE_SAMESITE ?? (isProd ? 'none' : 'lax'),
   COOKIE_SECURE: parsed.COOKIE_SECURE ?? null,
   REDIS_ENABLED: parsed.REDIS_ENABLED ?? (isProd ? true : false),
   METRICS_ENABLED: parsed.METRICS_ENABLED ?? (isProd ? true : false),
@@ -230,6 +233,9 @@ if (isProd) {
   }
   if (env.ALLOWED_ORIGINS.includes('*')) {
     throw new Error('ALLOWED_ORIGINS must not include "*" in production when using credentialed CORS');
+  }
+  if (env.AUTH_COOKIE_SAMESITE === 'none' && env.COOKIE_SECURE === false) {
+    throw new Error('COOKIE_SECURE must be true in production when AUTH_COOKIE_SAMESITE is "none"');
   }
 
   // SMTP: production hardening (optional feature; validated when enabled).
