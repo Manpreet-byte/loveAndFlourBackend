@@ -113,6 +113,7 @@ async function preflight() {
 await preflight();
 
 server.listen(env.PORT, env.HOST, () => {
+  console.log(`Server running on port ${env.PORT}`);
   logger.info({ host: env.HOST, port: env.PORT, env: env.NODE_ENV }, 'listening');
 });
 
