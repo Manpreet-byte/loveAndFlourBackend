@@ -233,6 +233,15 @@ export async function login(req, res, next) {
       await sendEmailVerification({ user });
     }
 
+    // Admin realtime notifications: user logged in
+    notifyAdmins({
+      notificationType: 'admin_user_login',
+      title: 'User logged in',
+      message: `${user.name} (${user.email}) logged in.`,
+      linkUrl: '/admin/dashboard',
+      metadata: { user_id: user.id, email: user.email },
+    }).catch(() => {});
+
     return res.json({
       user: { id: user.id, name: user.name, email: user.email, role: user.role, emailVerified: !!user.email_verified_at },
       token: accessToken,

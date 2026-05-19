@@ -317,6 +317,15 @@ export async function googleCallback(req, res, next) {
       metadata: { email },
     });
 
+    // Admin realtime notifications: user logged in via Google
+    notifyAdmins({
+      notificationType: 'admin_user_login',
+      title: 'User logged in',
+      message: `${result.user.name} (${result.user.email}) logged in with Google.`,
+      linkUrl: '/admin/dashboard',
+      metadata: { user_id: result.user.id, email: result.user.email, provider: 'google' },
+    }).catch(() => {});
+
     // Redirect back to frontend with token; frontend will store it and hydrate.
     const fallbackBase = String(env.PUBLIC_WEB_BASE_URL ?? '').trim().replace(/\/$/, '');
     const resolvedBase = nextBase || fallbackBase;
