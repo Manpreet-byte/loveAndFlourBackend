@@ -16,6 +16,9 @@ import {
   ensureUserExperienceTables,
   ensureUsersAuthColumns,
 } from './utils/dbCompat.js';
+import { syncSeedCoursesToDb } from './services/seedSyncService.js';
+
+console.log(`Backend port: ${env.PORT}`);
 
 const server = http.createServer(app);
 
@@ -79,6 +82,7 @@ async function preflight() {
       await ensureUserExperienceTables({ pool });
       await ensureLmsCoreTables({ pool });
       await ensureAnalyticsTables({ pool });
+      await syncSeedCoursesToDb({ pool, logger });
     } catch (err) {
       logger.error({ err }, 'preflight_db_compat_failed');
       if (env.NODE_ENV === 'production') throw err;
@@ -111,6 +115,8 @@ async function preflight() {
 }
 
 await preflight();
+
+console.log(`Starting backend on port ${env.PORT}`);
 
 server.listen(env.PORT, env.HOST, () => {
   console.log(`Server running on port ${env.PORT}`);

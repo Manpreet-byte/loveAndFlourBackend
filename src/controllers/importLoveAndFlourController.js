@@ -15,11 +15,31 @@ const importSchema = z.object({
 
 const WP_BASE = 'https://loveandflourbypooja.com';
 const SOURCE = 'loveandflourbypooja';
+const WORKSHOP_CATEGORY_HINTS = new Set(['upcoming-live-workshops', 'upcoming-live-session', 'recorded-live-workshop', 'e-book']);
 
 function hasWorkshopSignal({ slug, title }) {
   const s = String(slug ?? '').toLowerCase();
   const t = String(title ?? '').toLowerCase();
   return s.includes('workshop') || t.includes('workshop') || t.includes('masterclass');
+}
+
+function getEmbeddedTermSlugs(product) {
+  const embedded = product?._embedded?.['wp:term'];
+  if (!Array.isArray(embedded)) return [];
+  const out = [];
+  for (const group of embedded) {
+    if (!Array.isArray(group)) continue;
+    for (const term of group) {
+      const slug = String(term?.slug ?? '').trim();
+      if (slug) out.push(slugify(slug));
+    }
+  }
+  return out;
+}
+
+function hasCategoryHint(product) {
+  const slugs = getEmbeddedTermSlugs(product);
+  return slugs.some((s) => WORKSHOP_CATEGORY_HINTS.has(s));
 }
 
 async function fetchJson(url, { timeoutMs = 30000 } = {}) {
@@ -100,7 +120,7 @@ export async function adminImportLoveAndFlour(req, res, next) {
           if (!wpId) continue;
           // When importing a selected set (from admin preview), allow any product slug.
           // Otherwise, use a conservative heuristic for "workshop-like" items.
-          if (!allowedSlugs && !hasWorkshopSignal({ slug: wpSlug, title })) continue;
+          if (!allowedSlugs && !hasWorkshopSignal({ slug: wpSlug, title }) && !hasCategoryHint(product)) continue;
           if (allowedSlugs && !allowedSlugs.has(finalSlug)) continue;
 
           remaining -= 1;
