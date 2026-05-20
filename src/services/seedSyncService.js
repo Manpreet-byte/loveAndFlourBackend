@@ -36,6 +36,7 @@ function stripHtml(contentHtml) {
 }
 
 function buildSeedPath() {
+  if (process.env.LF_SEED_COURSES_PATH) return String(process.env.LF_SEED_COURSES_PATH);
   const here = path.dirname(fileURLToPath(import.meta.url));
   // backend/src/services -> backend/src -> backend -> repo root
   const repoRoot = path.resolve(here, '..', '..', '..');

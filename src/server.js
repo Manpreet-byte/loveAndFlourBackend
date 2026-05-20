@@ -82,7 +82,9 @@ async function preflight() {
       await ensureUserExperienceTables({ pool });
       await ensureLmsCoreTables({ pool });
       await ensureAnalyticsTables({ pool });
-      await syncSeedCoursesToDb({ pool, logger });
+      if (env.NODE_ENV !== 'production' || String(process.env.LF_ENABLE_SEED_SYNC ?? '') === '1') {
+        await syncSeedCoursesToDb({ pool, logger });
+      }
     } catch (err) {
       logger.error({ err }, 'preflight_db_compat_failed');
       if (env.NODE_ENV === 'production') throw err;
