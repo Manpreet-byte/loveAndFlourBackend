@@ -16,6 +16,10 @@ const importSchema = z.object({
 const WP_BASE = 'https://loveandflourbypooja.com';
 const SOURCE = 'loveandflourbypooja';
 const WORKSHOP_CATEGORY_HINTS = new Set(['upcoming-live-workshops', 'upcoming-live-session', 'recorded-live-workshop', 'e-book']);
+const ALWAYS_IMPORT_SLUGS = new Set([
+  // Seed-only / atypically-named workshops that should still be purchasable.
+  'high-protein-meal-bowl',
+]);
 
 function hasWorkshopSignal({ slug, title }) {
   const s = String(slug ?? '').toLowerCase();
@@ -120,7 +124,7 @@ export async function adminImportLoveAndFlour(req, res, next) {
           if (!wpId) continue;
           // When importing a selected set (from admin preview), allow any product slug.
           // Otherwise, use a conservative heuristic for "workshop-like" items.
-          if (!allowedSlugs && !hasWorkshopSignal({ slug: wpSlug, title }) && !hasCategoryHint(product)) continue;
+          if (!allowedSlugs && !ALWAYS_IMPORT_SLUGS.has(finalSlug) && !hasWorkshopSignal({ slug: wpSlug, title }) && !hasCategoryHint(product)) continue;
           if (allowedSlugs && !allowedSlugs.has(finalSlug)) continue;
 
           remaining -= 1;
