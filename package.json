@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "node scripts/prepareSeedCourses.js",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "create:admin": "node scripts/createAdmin.js",
