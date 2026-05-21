@@ -44,15 +44,22 @@ async function upsertCourseFromSeed(seed) {
   const title = String(seed?.title ?? slug).trim().slice(0, 255);
   const summary = String(seed?.excerptHtml ?? '').trim();
   const content = String(seed?.contentHtml ?? '').trim();
-  const featured = seed?.featuredImage?.src ? String(seed.featuredImage.src) : null;
+  const featured =
+    typeof seed?.featuredImage === 'string'
+      ? String(seed.featuredImage)
+      : seed?.featuredImage?.src
+        ? String(seed.featuredImage.src)
+        : null;
   const publishedAt = seed?.date ? new Date(seed.date) : new Date();
 
   // Create or update by unique `slug`
   await pool.query(
-    `INSERT INTO courses (title, slug, summary, content, featured_image_url, is_published, published_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?)
+    `INSERT INTO courses (title, slug, kind, source, summary, content, featured_image_url, is_published, published_at)
+     VALUES (?, ?, 'workshop', 'local', ?, ?, ?, 1, ?)
      ON DUPLICATE KEY UPDATE
        title = VALUES(title),
+       kind = 'workshop',
+       source = COALESCE(courses.source, 'local'),
        summary = VALUES(summary),
        content = VALUES(content),
        featured_image_url = VALUES(featured_image_url),
@@ -80,7 +87,26 @@ async function upsertCourseFromSeed(seed) {
 
 async function main() {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const seedPath = path.resolve(here, '../../frontend/loveAndFlour/src/data/seed/courses.json');
+  const candidates = [
+    process.env.SEED_COURSES_PATH ? path.resolve(process.env.SEED_COURSES_PATH) : null,
+    path.resolve(here, '../../frontend/loveAndFlour/src/data/seed/courses.json'),
+    path.resolve(here, '../seed/courses.json'),
+    path.resolve(here, '../seed/courses.local.json'),
+  ].filter(Boolean);
+
+  let seedPath = null;
+  for (const p of candidates) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await fs.access(p);
+      seedPath = p;
+      break;
+    } catch {
+      // ignore
+    }
+  }
+  if (!seedPath) throw new Error('Seed courses JSON not found. Set SEED_COURSES_PATH or include a seed file.');
+
   const raw = await fs.readFile(seedPath, 'utf8');
   const seeds = JSON.parse(raw);
   if (!Array.isArray(seeds) || seeds.length === 0) {
@@ -104,4 +130,3 @@ main().catch((err) => {
   console.error(err);
   process.exitCode = 1;
 });
-

@@ -23,6 +23,11 @@
 - Dry run: `npm run migrate:dry`
 - Apply pending migrations: `npm run migrate`
 
+## Sync frontend "offline" workshops into DB
+If the frontend is showing workshops from its offline seed list, but `/api/public/courses/:slug` returns `Course not found`,
+sync the frontend seed data into the backend DB:
+- `npm run seed:frontend`
+
 ## Run
 - Dev: `npm run dev`
 - Prod: `npm start`

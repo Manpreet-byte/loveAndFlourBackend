@@ -38,13 +38,31 @@ function stripHtml(contentHtml) {
 function buildSeedPath() {
   if (process.env.LF_SEED_COURSES_PATH) return String(process.env.LF_SEED_COURSES_PATH);
   const here = path.dirname(fileURLToPath(import.meta.url));
-  // backend/src/services -> backend/src -> backend -> repo root
-  const repoRoot = path.resolve(here, '..', '..', '..');
-  return path.join(repoRoot, 'frontend', 'loveAndFlour', 'src', 'data', 'seed', 'courses.json');
+  // backend/src/services -> backend/src -> backend
+  const backendRoot = path.resolve(here, '..', '..');
+  const repoRoot = path.resolve(backendRoot, '..');
+  // Prefer a bundled seed file (generated during deploy), then fall back to monorepo path.
+  return [
+    path.join(backendRoot, 'seed', 'courses.json'),
+    path.join(repoRoot, 'frontend', 'loveAndFlour', 'src', 'data', 'seed', 'courses.json'),
+  ];
 }
 
 async function loadSeedCourses() {
-  const seedPath = buildSeedPath();
+  const candidates = buildSeedPath();
+  const list = Array.isArray(candidates) ? candidates : [candidates];
+  let seedPath = null;
+  for (const p of list) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await fs.access(p);
+      seedPath = p;
+      break;
+    } catch {
+      // ignore
+    }
+  }
+  if (!seedPath) throw new Error('Seed courses JSON not found');
   const raw = await fs.readFile(seedPath, 'utf8');
   const parsed = JSON.parse(raw);
   return Array.isArray(parsed) ? parsed : [];

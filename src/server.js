@@ -82,9 +82,9 @@ async function preflight() {
       await ensureUserExperienceTables({ pool });
       await ensureLmsCoreTables({ pool });
       await ensureAnalyticsTables({ pool });
-      if (env.NODE_ENV !== 'production' || String(process.env.LF_ENABLE_SEED_SYNC ?? '') === '1') {
-        await syncSeedCoursesToDb({ pool, logger });
-      }
+      // Keep "offline seeded" workshops reachable in production without manual DB tasks.
+      // No-op if the seed file isn't present.
+      await syncSeedCoursesToDb({ pool, logger });
     } catch (err) {
       logger.error({ err }, 'preflight_db_compat_failed');
       if (env.NODE_ENV === 'production') throw err;
