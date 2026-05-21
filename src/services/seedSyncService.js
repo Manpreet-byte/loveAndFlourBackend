@@ -8,11 +8,13 @@ function parseInrToMinorUnits(contentHtml) {
 
   // Try to match common patterns used on the legacy site.
   const patterns = [
+    /Early\s*Bird\s*Fee:\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
     /Class Fee:\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
     /Event Fee:\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
     /Regular Price:\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
     /Price:\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
     /Fee:\s*₹\s*([\d,]+(?:\.\d{1,2})?)/i,
+    /₹\s*([\d,]+(?:\.\d{1,2})?)/i,
   ];
 
   for (const re of patterns) {
@@ -116,14 +118,14 @@ export async function syncSeedCoursesToDb({ pool, logger }) {
     if (activePrice?.id) continue;
 
     const amountCents = parseInrToMinorUnits(course?.contentHtml ?? course?.excerptHtml ?? '');
-    if (!amountCents) continue;
+    const finalAmountCents = amountCents || 2000 * 100;
 
     // eslint-disable-next-line no-await-in-loop
     await pool.query('UPDATE course_prices SET is_active = 0 WHERE course_id = ? AND currency = ?', [courseId, 'INR']);
     // eslint-disable-next-line no-await-in-loop
     await pool.query(
       'INSERT INTO course_prices (course_id, currency, amount_cents, is_active) VALUES (?, ?, ?, 1)',
-      [courseId, 'INR', Number(amountCents)],
+      [courseId, 'INR', Number(finalAmountCents)],
     );
     priced += 1;
   }
