@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { pool } from '../config/db.js';
 import { slugify } from '../utils/slug.js';
 import { sanitizeBasicHtml } from '../utils/sanitizeHtml.js';
@@ -16,10 +19,37 @@ const importSchema = z.object({
 const WP_BASE = 'https://loveandflourbypooja.com';
 const SOURCE = 'loveandflourbypooja';
 const WORKSHOP_CATEGORY_HINTS = new Set(['upcoming-live-workshops', 'upcoming-live-session', 'recorded-live-workshop', 'e-book']);
-const ALWAYS_IMPORT_SLUGS = new Set([
-  // Seed-only / atypically-named workshops that should still be purchasable.
-  'high-protein-meal-bowl',
-]);
+const ALWAYS_IMPORT_SLUGS = new Set();
+let seedSlugCache = null;
+
+function buildDefaultSeedCoursesPath() {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(here, '..', '..', '..');
+  return path.join(repoRoot, 'frontend', 'loveAndFlour', 'src', 'data', 'seed', 'courses.json');
+}
+
+async function loadSeedSlugsOnce() {
+  if (seedSlugCache) return seedSlugCache;
+  try {
+    const seedPath = process.env.LF_SEED_COURSES_PATH ? String(process.env.LF_SEED_COURSES_PATH) : buildDefaultSeedCoursesPath();
+    const raw = await fs.readFile(seedPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const slugs = Array.isArray(parsed) ? parsed.map((c) => slugify(String(c?.slug ?? ''))).filter(Boolean) : [];
+    seedSlugCache = new Set(slugs);
+  } catch {
+    seedSlugCache = new Set();
+  }
+  return seedSlugCache;
+}
+
+function loadEnvSlugAllowlist() {
+  const raw = String(process.env.LF_ALWAYS_IMPORT_SLUGS ?? '').trim();
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((s) => slugify(String(s).trim()))
+    .filter(Boolean);
+}
 
 function hasWorkshopSignal({ slug, title }) {
   const s = String(slug ?? '').toLowerCase();
@@ -100,6 +130,8 @@ export async function adminImportLoveAndFlour(req, res, next) {
     let createdRecipeCategories = 0;
 
     const perPage = 100;
+    const seedSlugs = await loadSeedSlugsOnce();
+    for (const slug of loadEnvSlugAllowlist()) ALWAYS_IMPORT_SLUGS.add(slug);
 
     if (importWorkshops) {
       let page = 1;
@@ -124,7 +156,8 @@ export async function adminImportLoveAndFlour(req, res, next) {
           if (!wpId) continue;
           // When importing a selected set (from admin preview), allow any product slug.
           // Otherwise, use a conservative heuristic for "workshop-like" items.
-          if (!allowedSlugs && !ALWAYS_IMPORT_SLUGS.has(finalSlug) && !hasWorkshopSignal({ slug: wpSlug, title }) && !hasCategoryHint(product)) continue;
+          const forced = ALWAYS_IMPORT_SLUGS.has(finalSlug) || seedSlugs.has(finalSlug);
+          if (!allowedSlugs && !forced && !hasWorkshopSignal({ slug: wpSlug, title }) && !hasCategoryHint(product)) continue;
           if (allowedSlugs && !allowedSlugs.has(finalSlug)) continue;
 
           remaining -= 1;

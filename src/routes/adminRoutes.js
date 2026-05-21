@@ -45,6 +45,7 @@ import { adminSendPush } from '../controllers/adminPushController.js';
 import { adminEmailOutboxStats, adminListEmailOutbox, adminResendEmailOutbox } from '../controllers/adminEmailController.js';
 import { adminImportLoveAndFlour } from '../controllers/importLoveAndFlourController.js';
 import { adminPreviewLoveAndFlour } from '../controllers/importLoveAndFlourPreviewController.js';
+import { adminUpsertSeedCourses } from '../controllers/seedCoursesController.js';
 import { adminGetRazorpayConfig, adminPatchRazorpayConfig } from '../controllers/adminRazorpayConfigController.js';
 import { superListAdmins, superResetAdminPassword, superRevokeAdmin, superTransferSuperAdmin } from '../controllers/superAdminController.js';
 import { adminCreateTag, adminDeleteTag, adminListTags } from '../controllers/tagAdminController.js';
@@ -133,6 +134,9 @@ router.delete('/categories/:id', deleteCategory);
 // Imports (admin-only helpers)
 router.post('/imports/loveandflour', adminImportLoveAndFlour);
 router.post('/imports/loveandflour/preview', adminPreviewLoveAndFlour);
+
+// Seed helpers (admin-only)
+router.post('/seed/courses', adminUpsertSeedCourses);
 
 // Recipes
 router.post('/recipes', createRecipe);

@@ -42,6 +42,11 @@ export function parseCheckoutRequest(body) {
 export async function computeCheckout({ userId, items, couponCode, currency: desiredCurrency = null }) {
   const courseIds = [...new Set(items.map((i) => i.course_id))];
   const selectedCurrency = desiredCurrency ? String(desiredCurrency).trim().toUpperCase() : await getDefaultCurrency();
+  if (selectedCurrency !== 'INR') {
+    const err = new Error('Only INR currency is supported');
+    err.status = 400;
+    throw err;
+  }
   const [rows] = await pool.query(
     `SELECT c.id, c.title, c.is_published,
             c.kind,

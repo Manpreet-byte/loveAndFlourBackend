@@ -1,6 +1,6 @@
 import { pool } from '../config/db.js';
 import { cacheWrap } from '../services/cacheService.js';
-import { computeEffectivePriceCents, getDefaultCurrency } from '../services/pricingService.js';
+import { computeEffectivePriceCents } from '../services/pricingService.js';
 
 const IMPORT_SOURCE = 'loveandflourbypooja';
 
@@ -62,8 +62,7 @@ function mapRecipeRow(row) {
 
 export async function listPublicCourses(_req, res, next) {
   try {
-    const currency = String(_req.query?.currency ?? '').trim().toUpperCase();
-    const selectedCurrency = currency && currency.length === 3 ? currency : await getDefaultCurrency();
+    const selectedCurrency = 'INR';
     const payload = await cacheWrap({
       ns: 'public_courses',
       key: `list:v1:kind:workshop:source:loveandflour:cur:${selectedCurrency}`,
@@ -112,8 +111,7 @@ export async function listPublicCourses(_req, res, next) {
 export async function getPublicCourseBySlug(req, res, next) {
   try {
     const slug = String(req.params.slug ?? '').trim();
-    const currency = String(req.query?.currency ?? '').trim().toUpperCase();
-    const selectedCurrency = currency && currency.length === 3 ? currency : await getDefaultCurrency();
+    const selectedCurrency = 'INR';
     const payload = await cacheWrap({
       ns: 'public_course_detail',
       key: `slug:${slug}:kind:workshop:source:loveandflour:cur:${selectedCurrency}`,
@@ -152,8 +150,7 @@ export async function getPublicCourseBySlug(req, res, next) {
 
 export async function listPublicWorkshops(_req, res, next) {
   try {
-    const currency = String(_req.query?.currency ?? '').trim().toUpperCase();
-    const selectedCurrency = currency && currency.length === 3 ? currency : await getDefaultCurrency();
+    const selectedCurrency = 'INR';
     const payload = await cacheWrap({
       ns: 'public_courses',
       key: `list:v1:kind:workshop:cur:${selectedCurrency}`,
@@ -202,8 +199,7 @@ export async function listPublicWorkshops(_req, res, next) {
 export async function getPublicWorkshopBySlug(req, res, next) {
   try {
     const slug = String(req.params.slug ?? '').trim();
-    const currency = String(req.query?.currency ?? '').trim().toUpperCase();
-    const selectedCurrency = currency && currency.length === 3 ? currency : await getDefaultCurrency();
+    const selectedCurrency = 'INR';
     const payload = await cacheWrap({
       ns: 'public_course_detail',
       key: `slug:${slug}:kind:workshop:cur:${selectedCurrency}`,

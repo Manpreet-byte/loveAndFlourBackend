@@ -15,7 +15,7 @@ const createSchema = z.object({
   discount_type: z.enum(['amount', 'percent']).default('amount'),
   discount_value_cents: z.coerce.number().int().nonnegative().optional().nullable(),
   discount_percent: z.coerce.number().min(0).max(100).optional().nullable(),
-  currency: z.string().trim().min(3).max(3).default('INR'),
+  currency: z.literal('INR').default('INR'),
   max_redemptions: z.coerce.number().int().positive().optional().nullable(),
   max_redemptions_per_user: z.coerce.number().int().positive().optional().nullable(),
   min_order_total_cents: z.coerce.number().int().nonnegative().optional().nullable(),
@@ -90,7 +90,7 @@ export async function adminCreateCoupon(req, res, next) {
         payload.discount_type,
         payload.discount_value_cents ?? null,
         payload.discount_percent ?? null,
-        payload.currency,
+        'INR',
         payload.max_redemptions ?? null,
         payload.max_redemptions_per_user ?? null,
         payload.min_order_total_cents ?? null,
@@ -136,7 +136,7 @@ export async function adminUpdateCoupon(req, res, next) {
     if (payload.discount_type !== undefined) push('discount_type', payload.discount_type);
     if (payload.discount_value_cents !== undefined) push('discount_value_cents', payload.discount_value_cents ?? null);
     if (payload.discount_percent !== undefined) push('discount_percent', payload.discount_percent ?? null);
-    if (payload.currency !== undefined) push('currency', payload.currency);
+    if (payload.currency !== undefined) push('currency', 'INR');
     if (payload.max_redemptions !== undefined) push('max_redemptions', payload.max_redemptions ?? null);
     if (payload.max_redemptions_per_user !== undefined) push('max_redemptions_per_user', payload.max_redemptions_per_user ?? null);
     if (payload.min_order_total_cents !== undefined) push('min_order_total_cents', payload.min_order_total_cents ?? null);
@@ -189,4 +189,3 @@ export async function adminDeleteCoupon(req, res, next) {
     return next(err);
   }
 }
-
