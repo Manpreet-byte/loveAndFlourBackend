@@ -34,6 +34,21 @@ function normalizeCode(code) {
     .toUpperCase();
 }
 
+function toNullableMysqlDatetime(value, fieldName) {
+  if (value == null || value === '') return null;
+  const normalized = toMysqlDatetime(value);
+  if (!normalized) {
+    const err = new Error(`Invalid ${fieldName}`);
+    err.status = 400;
+    throw err;
+  }
+  return normalized;
+}
+
+function isCouponWriteSqlError(err) {
+  return ['ER_DATA_TOO_LONG', 'ER_BAD_NULL_ERROR', 'ER_NO_DEFAULT_FOR_FIELD', 'ER_TRUNCATED_WRONG_VALUE', 'ER_TRUNCATED_WRONG_VALUE_FOR_FIELD'].includes(err?.code);
+}
+
 export async function adminListCoupons(req, res, next) {
   try {
     const { q, active, limit } = listSchema.parse(req.query);
@@ -69,8 +84,8 @@ export async function adminCreateCoupon(req, res, next) {
   try {
     const payload = createSchema.parse(req.body ?? {});
     const code = normalizeCode(payload.code);
-    const startsAt = payload.starts_at ? toMysqlDatetime(payload.starts_at) : null;
-    const endsAt = payload.ends_at ? toMysqlDatetime(payload.ends_at) : null;
+    const startsAt = toNullableMysqlDatetime(payload.starts_at, 'starts_at');
+    const endsAt = toNullableMysqlDatetime(payload.ends_at, 'ends_at');
     if (payload.discount_type === 'amount' && (payload.discount_value_cents == null || payload.discount_value_cents <= 0)) {
       return res.status(400).json({ error: { message: 'discount_value_cents required for amount coupons' } });
     }
@@ -114,6 +129,9 @@ export async function adminCreateCoupon(req, res, next) {
     return res.status(201).json({ coupon_id: result.insertId });
   } catch (err) {
     if (err?.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: { message: 'Coupon code already exists' } });
+    if (isCouponWriteSqlError(err)) {
+      return res.status(400).json({ error: { message: 'Invalid coupon data' } });
+    }
     return next(err);
   }
 }
@@ -140,8 +158,8 @@ export async function adminUpdateCoupon(req, res, next) {
     if (payload.max_redemptions !== undefined) push('max_redemptions', payload.max_redemptions ?? null);
     if (payload.max_redemptions_per_user !== undefined) push('max_redemptions_per_user', payload.max_redemptions_per_user ?? null);
     if (payload.min_order_total_cents !== undefined) push('min_order_total_cents', payload.min_order_total_cents ?? null);
-    if (payload.starts_at !== undefined) push('starts_at', payload.starts_at ? toMysqlDatetime(payload.starts_at) : null);
-    if (payload.ends_at !== undefined) push('ends_at', payload.ends_at ? toMysqlDatetime(payload.ends_at) : null);
+    if (payload.starts_at !== undefined) push('starts_at', toNullableMysqlDatetime(payload.starts_at, 'starts_at'));
+    if (payload.ends_at !== undefined) push('ends_at', toNullableMysqlDatetime(payload.ends_at, 'ends_at'));
     if (payload.is_active !== undefined) push('is_active', payload.is_active ? 1 : 0);
 
     if (!fields.length) return res.json({ ok: true });
@@ -163,6 +181,9 @@ export async function adminUpdateCoupon(req, res, next) {
     return res.json({ ok: true });
   } catch (err) {
     if (err?.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: { message: 'Coupon code already exists' } });
+    if (isCouponWriteSqlError(err)) {
+      return res.status(400).json({ error: { message: 'Invalid coupon data' } });
+    }
     return next(err);
   }
 }
