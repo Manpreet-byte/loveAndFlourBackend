@@ -254,8 +254,14 @@ export async function updateCourse(req, res, next) {
       }
     }
 
-    await invalidatePublicCourses();
-    await invalidateCategories();
+    // Invalidate caches so changes appear immediately
+    try {
+      await invalidatePublicCourses();
+      await invalidateCategories();
+    } catch (cacheErr) {
+      console.error('[cache invalidation] Failed to invalidate course caches:', cacheErr?.message);
+      // Continue even if cache invalidation fails - data is updated in DB
+    }
 
     // Push when a course is newly published.
     if (payload.is_published === true && before && Number(before.is_published) !== 1) {

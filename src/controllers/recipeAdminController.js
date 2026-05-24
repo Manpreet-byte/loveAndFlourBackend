@@ -192,8 +192,14 @@ export async function updateRecipe(req, res, next) {
       }
     }
 
-    await invalidatePublicRecipes();
-    await invalidateCategories();
+    // Invalidate caches so changes appear immediately
+    try {
+      await invalidatePublicRecipes();
+      await invalidateCategories();
+    } catch (cacheErr) {
+      console.error('[cache invalidation] Failed to invalidate recipe caches:', cacheErr?.message);
+      // Continue even if cache invalidation fails - data is updated in DB
+    }
 
     logAuditEvent({
       actorType: 'admin',
