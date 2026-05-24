@@ -86,6 +86,8 @@ export async function adminCreateCoupon(req, res, next) {
     const code = normalizeCode(payload.code);
     const startsAt = toNullableMysqlDatetime(payload.starts_at, 'starts_at');
     const endsAt = toNullableMysqlDatetime(payload.ends_at, 'ends_at');
+    const discountValueCents = payload.discount_type === 'amount' ? payload.discount_value_cents ?? null : 0;
+    const discountPercent = payload.discount_type === 'percent' ? payload.discount_percent ?? null : 0;
     if (payload.discount_type === 'amount' && (payload.discount_value_cents == null || payload.discount_value_cents <= 0)) {
       return res.status(400).json({ error: { message: 'discount_value_cents required for amount coupons' } });
     }
@@ -103,8 +105,8 @@ export async function adminCreateCoupon(req, res, next) {
         code,
         payload.description ?? null,
         payload.discount_type,
-        payload.discount_value_cents ?? null,
-        payload.discount_percent ?? null,
+        discountValueCents,
+        discountPercent,
         'INR',
         payload.max_redemptions ?? null,
         payload.max_redemptions_per_user ?? null,
@@ -141,6 +143,7 @@ export async function adminUpdateCoupon(req, res, next) {
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: { message: 'Invalid coupon id' } });
     const payload = updateSchema.parse(req.body ?? {});
+    const discountType = payload.discount_type;
 
     const fields = [];
     const values = [];
@@ -151,9 +154,13 @@ export async function adminUpdateCoupon(req, res, next) {
 
     if (payload.code !== undefined) push('code', normalizeCode(payload.code));
     if (payload.description !== undefined) push('description', payload.description ?? null);
-    if (payload.discount_type !== undefined) push('discount_type', payload.discount_type);
-    if (payload.discount_value_cents !== undefined) push('discount_value_cents', payload.discount_value_cents ?? null);
-    if (payload.discount_percent !== undefined) push('discount_percent', payload.discount_percent ?? null);
+    if (discountType !== undefined) push('discount_type', discountType);
+    if (payload.discount_value_cents !== undefined) {
+      push('discount_value_cents', discountType === 'percent' ? 0 : payload.discount_value_cents ?? 0);
+    }
+    if (payload.discount_percent !== undefined) {
+      push('discount_percent', discountType === 'amount' ? 0 : payload.discount_percent ?? 0);
+    }
     if (payload.currency !== undefined) push('currency', 'INR');
     if (payload.max_redemptions !== undefined) push('max_redemptions', payload.max_redemptions ?? null);
     if (payload.max_redemptions_per_user !== undefined) push('max_redemptions_per_user', payload.max_redemptions_per_user ?? null);
