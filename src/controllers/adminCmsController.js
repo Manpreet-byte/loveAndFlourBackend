@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { pool } from '../config/db.js';
 import { getRequestAuditContext, logAuditEvent } from '../services/auditLogService.js';
 import { enqueuePushForUsers } from '../services/push/pushOutboxService.js';
+import { bumpNamespace } from '../services/cacheService.js';
 
 function stripScripts(html) {
   const raw = String(html ?? '');
@@ -76,6 +77,12 @@ export async function patchHomepage(req, res, next) {
   try {
     const payload = contentPatchSchema.parse(req.body ?? {});
     await upsertSiteContent({ actorId: req.user.id, key: 'homepage', payload });
+    // Invalidate any cached public homepage content so updates take effect immediately.
+    try {
+      await bumpNamespace('cms_homepage');
+    } catch {
+      // non-fatal: continue even if cache invalidation fails
+    }
     logAuditEvent({
       actorType: 'admin',
       actorId: req.user.id,
