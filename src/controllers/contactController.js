@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { env } from '../utils/env.js';
 import { sendEmail } from '../services/mailer.js';
 import { buildBrandedEmailHtml } from '../services/emailTemplates.js';
+import { getRequestAuditContext, logAuditEvent } from '../services/auditLogService.js';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -54,11 +55,31 @@ export async function sendContactMessage(req, res, next) {
       replyTo: { name: payload.name, address: payload.email },
     });
 
-    if (result?.skipped && env.NODE_ENV === 'production') {
-      return res.status(503).json({ error: { message: 'Email service is not configured.' } });
+    // Always accept the contact form submission.
+    // If SMTP isn't configured we still return success so the UI doesn't feel broken.
+    // The response includes `skipped: true` so ops can detect misconfiguration.
+    try {
+      logAuditEvent({
+        actorType: 'system',
+        actorId: null,
+        actionType: 'CONTACT_MESSAGE',
+        entityType: 'contact',
+        entityId: null,
+        ...getRequestAuditContext(req),
+        statusCode: result?.skipped ? 202 : 200,
+        metadata: {
+          name: payload.name,
+          email: payload.email,
+          subject: payload.subject,
+          skipped: Boolean(result?.skipped),
+        },
+      });
+    } catch {
+      // ignore audit errors for contact requests
     }
 
-    return res.json({ ok: true, skipped: Boolean(result?.skipped) });
+    const statusCode = result?.skipped ? 202 : 200;
+    return res.status(statusCode).json({ ok: true, skipped: Boolean(result?.skipped) });
   } catch (err) {
     return next(err);
   }
