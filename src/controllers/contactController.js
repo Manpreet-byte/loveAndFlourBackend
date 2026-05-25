@@ -23,7 +23,7 @@ const contactSchema = z.object({
 export async function sendContactMessage(req, res, next) {
   try {
     const payload = contactSchema.parse(req.body ?? {});
-    const to = String(env.CONTACT_TO_EMAIL ?? '').trim() || 'contact@loveandflourbypooja.com';
+    const to = String(env.CONTACT_TO_EMAIL ?? '').trim() || 'manpreet24@navgurukul.org';
     const subject = `${env.CONTACT_SUBJECT_PREFIX || '[Contact]'} ${payload.subject}`.trim();
 
     const metaLines = [
