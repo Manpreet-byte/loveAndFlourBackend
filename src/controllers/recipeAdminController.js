@@ -8,6 +8,11 @@ const createRecipeSchema = z.object({
   title: z.string().min(1).max(255),
   summary: z.string().max(5000).optional().nullable(),
   content: z.string().optional().nullable(),
+  // Accept explicit structured recipe fields from admin UI
+  description: z.string().max(10000).optional().nullable(),
+  ingredients: z.union([z.string(), z.array(z.string())]).optional().nullable(),
+  instructions: z.union([z.string(), z.array(z.string())]).optional().nullable(),
+  notes: z.union([z.string(), z.array(z.string())]).optional().nullable(),
   featured_image_url: z.string().url().max(1024).optional().nullable(),
   category_ids: z.array(z.coerce.number().int().positive()).default([]),
   tag_ids: z.array(z.coerce.number().int().positive()).default([]),
@@ -22,13 +27,42 @@ export async function createRecipe(req, res, next) {
     const publishAt = payload.publish_at ? new Date(String(payload.publish_at)) : null;
     const publishedAt = payload.is_published ? new Date() : null;
 
+    // If admin provided structured fields, serialize into HTML content for frontend parsing.
+    const buildContentFromStructured = (p) => {
+      const parts = [];
+      if (p.description) parts.push(`<div>${String(p.description)}</div>`);
+      if (p.ingredients) {
+        const items = Array.isArray(p.ingredients) ? p.ingredients : String(p.ingredients).split(/\r?\n|,/).map(s=>s.trim()).filter(Boolean);
+        parts.push('<h3>Ingredients</h3>');
+        parts.push('<ul>');
+        for (const it of items) parts.push(`<li>${String(it)}</li>`);
+        parts.push('</ul>');
+      }
+      if (p.instructions) {
+        const steps = Array.isArray(p.instructions) ? p.instructions : String(p.instructions).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+        parts.push('<h3>Instructions</h3>');
+        parts.push('<ol>');
+        for (const st of steps) parts.push(`<li>${String(st)}</li>`);
+        parts.push('</ol>');
+      }
+      if (p.notes) {
+        const notes = Array.isArray(p.notes) ? p.notes : String(p.notes).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+        parts.push('<h3>Notes</h3>');
+        for (const n of notes) parts.push(`<p>${String(n)}</p>`);
+      }
+      return parts.join('\n');
+    };
+
+    const structuredContent = buildContentFromStructured(payload);
+    const finalContent = structuredContent || payload.content || null;
+
     const [result] = await pool.query(
       'INSERT INTO recipes (title, slug, summary, content, featured_image_url, is_published, publish_at, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [
         payload.title,
         slug,
-        payload.summary ?? null,
-        payload.content ?? null,
+        payload.summary ?? payload.description ?? null,
+        finalContent,
         payload.featured_image_url ?? null,
         payload.is_published ? 1 : 0,
         payload.is_published ? null : publishAt,
@@ -162,7 +196,39 @@ export async function updateRecipe(req, res, next) {
     }
     if (payload.summary !== undefined) push('summary', payload.summary ?? null);
     if (payload.featured_image_url !== undefined) push('featured_image_url', payload.featured_image_url ?? null);
+    // If admin provided structured fields, serialize into HTML content for frontend parsing.
+    const buildContentFromStructured = (p) => {
+      const parts = [];
+      if (p.description) parts.push(`<div>${String(p.description)}</div>`);
+      if (p.ingredients) {
+        const items = Array.isArray(p.ingredients) ? p.ingredients : String(p.ingredients).split(/\r?\n|,/).map(s=>s.trim()).filter(Boolean);
+        parts.push('<h3>Ingredients</h3>');
+        parts.push('<ul>');
+        for (const it of items) parts.push(`<li>${String(it)}</li>`);
+        parts.push('</ul>');
+      }
+      if (p.instructions) {
+        const steps = Array.isArray(p.instructions) ? p.instructions : String(p.instructions).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+        parts.push('<h3>Instructions</h3>');
+        parts.push('<ol>');
+        for (const st of steps) parts.push(`<li>${String(st)}</li>`);
+        parts.push('</ol>');
+      }
+      if (p.notes) {
+        const notes = Array.isArray(p.notes) ? p.notes : String(p.notes).split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+        parts.push('<h3>Notes</h3>');
+        for (const n of notes) parts.push(`<p>${String(n)}</p>`);
+      }
+      return parts.join('\n');
+    };
+
     if (payload.content !== undefined) push('content', payload.content ?? null);
+    else if (payload.description || payload.ingredients || payload.instructions || payload.notes) {
+      const structured = buildContentFromStructured(payload);
+      push('content', structured || null);
+    }
+    if (payload.summary !== undefined) push('summary', payload.summary ?? null);
+    else if (payload.description) push('summary', payload.description ?? null);
     if (payload.is_published !== undefined) {
       push('is_published', payload.is_published ? 1 : 0);
       push('published_at', payload.is_published ? new Date() : null);

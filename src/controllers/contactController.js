@@ -15,6 +15,10 @@ function escapeHtml(value) {
 
 const contactSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  firstName: z.string().trim().min(1).max(80).optional(),
+  lastName: z.string().trim().min(1).max(80).optional(),
+  mobile: z.string().trim().min(3).max(40).optional(),
+  country: z.string().trim().min(2).max(80).optional(),
   email: z.string().trim().email().max(200),
   subject: z.string().trim().min(1).max(160),
   message: z.string().trim().min(1).max(5000),
@@ -28,9 +32,11 @@ export async function sendContactMessage(req, res, next) {
 
     const metaLines = [
       `From: ${payload.name} <${payload.email}>`,
+      payload.mobile ? `Mobile: ${payload.mobile}` : null,
+      payload.country ? `Country: ${payload.country}` : null,
       `IP: ${req.ip}`,
       `User-Agent: ${String(req.headers['user-agent'] ?? '')}`.trim(),
-    ];
+    ].filter(Boolean);
 
     const text = `${metaLines.join('\n')}\n\n${payload.message}`.trim();
     const html = buildBrandedEmailHtml({
@@ -39,6 +45,8 @@ export async function sendContactMessage(req, res, next) {
       footerText: 'This message was sent from the Love & Flour contact form.',
       contentHtml: `
         <p><strong>From:</strong> ${escapeHtml(payload.name)} &lt;${escapeHtml(payload.email)}&gt;</p>
+        ${payload.mobile ? `<p><strong>Mobile:</strong> ${escapeHtml(payload.mobile)}</p>` : ''}
+        ${payload.country ? `<p><strong>Country:</strong> ${escapeHtml(payload.country)}</p>` : ''}
         <p><strong>Subject:</strong> ${escapeHtml(payload.subject)}</p>
         <p><strong>IP:</strong> ${escapeHtml(req.ip)}</p>
         <p><strong>User-Agent:</strong> ${escapeHtml(String(req.headers['user-agent'] ?? ''))}</p>
@@ -69,6 +77,10 @@ export async function sendContactMessage(req, res, next) {
         statusCode: result?.skipped ? 202 : 200,
         metadata: {
           name: payload.name,
+          firstName: payload.firstName ?? null,
+          lastName: payload.lastName ?? null,
+          mobile: payload.mobile ?? null,
+          country: payload.country ?? null,
           email: payload.email,
           subject: payload.subject,
           skipped: Boolean(result?.skipped),

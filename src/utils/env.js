@@ -36,6 +36,7 @@ const schema = z.object({
     }),
 
   // SMTP email delivery
+  EMAIL_PROVIDER: z.enum(['smtp', 'resend']).optional().default('smtp'),
   SMTP_PROVIDER: z.enum(['custom', 'gmail', 'sendgrid', 'mailgun']).optional().default('custom'),
   SMTP_HOST: z.string().optional().default(''),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
@@ -67,6 +68,11 @@ const schema = z.object({
       if (v === '') return null;
       return v === 'true' || v === '1';
     }),
+
+  // Resend email API (HTTPS-based, avoids SMTP port blocks)
+  RESEND_API_KEY: z.string().optional().default(''),
+  RESEND_FROM_EMAIL: z.string().optional().default(''),
+  RESEND_FROM_NAME: z.string().optional().default(''),
 
   // Contact form delivery
   CONTACT_TO_EMAIL: z.string().optional().default('contact@loveandflourbypooja.com'),
