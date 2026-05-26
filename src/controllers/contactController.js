@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { env } from '../utils/env.js';
-import { sendEmail } from '../services/mailer.js';
+import { enqueueEmail } from '../services/emailOutbox.js';
 import { buildBrandedEmailHtml } from '../services/emailTemplates.js';
 import { getRequestAuditContext, logAuditEvent } from '../services/auditLogService.js';
 
@@ -55,17 +55,16 @@ export async function sendContactMessage(req, res, next) {
       `,
     });
 
-    const result = await sendEmail({
-      to,
+    await enqueueEmail({
+      toEmail: to,
       subject,
-      text,
-      html,
-      replyTo: { name: payload.name, address: payload.email },
+      bodyText: text,
+      bodyHtml: html,
     });
 
     // Always accept the contact form submission.
-    // If SMTP isn't configured we still return success so the UI doesn't feel broken.
-    // The response includes `skipped: true` so ops can detect misconfiguration.
+    // Delivery is handled asynchronously by the email worker so a temporary SMTP issue
+    // does not break the contact form for users.
     try {
       logAuditEvent({
         actorType: 'system',
@@ -74,7 +73,7 @@ export async function sendContactMessage(req, res, next) {
         entityType: 'contact',
         entityId: null,
         ...getRequestAuditContext(req),
-        statusCode: result?.skipped ? 202 : 200,
+        statusCode: 202,
         metadata: {
           name: payload.name,
           firstName: payload.firstName ?? null,
@@ -83,15 +82,14 @@ export async function sendContactMessage(req, res, next) {
           country: payload.country ?? null,
           email: payload.email,
           subject: payload.subject,
-          skipped: Boolean(result?.skipped),
+          queued: true,
         },
       });
     } catch {
       // ignore audit errors for contact requests
     }
 
-    const statusCode = result?.skipped ? 202 : 200;
-    return res.status(statusCode).json({ ok: true, skipped: Boolean(result?.skipped) });
+    return res.status(202).json({ ok: true, queued: true });
   } catch (err) {
     return next(err);
   }
