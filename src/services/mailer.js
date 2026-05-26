@@ -59,6 +59,19 @@ function resolveSmtpConfig() {
   };
 }
 
+function resolveFromAddress(provider) {
+  const configuredFrom = String(env.SMTP_FROM_EMAIL ?? '').trim();
+  const smtpUser = String(env.SMTP_USER ?? '').trim();
+
+  // Gmail is strict about sender identity. Prefer the authenticated mailbox so
+  // deployment configs don't fail if SMTP_FROM_EMAIL is missing or unverified.
+  if (provider === 'gmail') {
+    return smtpUser || configuredFrom || 'no-reply@loveandflour.local';
+  }
+
+  return configuredFrom || smtpUser || 'no-reply@loveandflour.local';
+}
+
 async function getTransporter() {
   if (transporter) return transporter;
 
@@ -158,8 +171,11 @@ export async function sendEmail({ to, subject, text, html, replyTo }) {
     }
   }
 
+  const smtpProvider = env.SMTP_PROVIDER ?? 'custom';
+  const fromAddress = resolveFromAddress(smtpProvider);
+
   const info = await tx.sendMail({
-    from: env.SMTP_FROM_NAME ? { name: env.SMTP_FROM_NAME, address: env.SMTP_FROM_EMAIL } : env.SMTP_FROM_EMAIL,
+    from: env.SMTP_FROM_NAME ? { name: env.SMTP_FROM_NAME, address: fromAddress } : fromAddress,
     to,
     replyTo: replyTo ?? undefined,
     subject,
