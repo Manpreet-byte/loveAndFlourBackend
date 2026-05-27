@@ -51,10 +51,14 @@ const passwordForgotSchema = z.object({
   email: z.string().email().max(254),
 });
 
-const passwordResetSchema = z.object({
-  token: z.string().min(20).max(512),
-  newPassword: z.string().min(8).max(72),
-});
+const passwordResetSchema = z
+  .object({
+    token: z.string().min(20).max(512),
+    newPassword: z.string().min(8).max(72).optional(),
+    // Backward compatibility for older clients.
+    password: z.string().min(8).max(72).optional(),
+  })
+  .refine((v) => Boolean(v.newPassword || v.password), { message: 'newPassword is required' });
 
 const emailVerifySchema = z.object({
   token: z.string().min(20).max(512),
@@ -468,7 +472,9 @@ export async function forgotPassword(req, res, next) {
 
 export async function resetPassword(req, res, next) {
   try {
-    const { token, newPassword } = passwordResetSchema.parse(req.body);
+    const parsed = passwordResetSchema.parse(req.body);
+    const token = parsed.token;
+    const newPassword = parsed.newPassword ?? parsed.password;
     const tokenHash = hashToken(token);
 
     await withTransaction(async (conn) => {

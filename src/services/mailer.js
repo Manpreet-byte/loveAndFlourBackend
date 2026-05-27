@@ -9,6 +9,10 @@ function hasResendConfig() {
   return Boolean(String(env.RESEND_API_KEY ?? '').trim()) && Boolean(String(env.RESEND_FROM_EMAIL ?? '').trim());
 }
 
+function hasSmtpConfig() {
+  return Boolean(resolveSmtpConfig());
+}
+
 async function loadNodemailer() {
   if (nodemailerModule) return nodemailerModule;
   try {
@@ -20,11 +24,18 @@ async function loadNodemailer() {
 }
 
 function resolveSmtpConfig() {
-  const provider = env.SMTP_PROVIDER ?? 'custom';
+  let provider = env.SMTP_PROVIDER ?? 'custom';
 
   let host = env.SMTP_HOST;
   let port = env.SMTP_PORT;
   let secure = env.SMTP_SECURE ?? null;
+
+  // Heuristic: many deployments set only SMTP_USER/SMTP_PASSWORD for Gmail.
+  // If SMTP_HOST is missing and the user is a Gmail mailbox, treat it as Gmail.
+  const smtpUser = String(env.SMTP_USER ?? '').trim();
+  if (!host && provider === 'custom' && smtpUser && /@gmail\.com$/i.test(smtpUser)) {
+    provider = 'gmail';
+  }
 
   if (!host && provider === 'gmail') {
     host = 'smtp.gmail.com';
@@ -124,20 +135,84 @@ async function sendViaResend({ to, subject, text, html, replyTo }) {
     ...(replyTo?.address ? { reply_to: replyTo.address } : null),
   };
 
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
+  const url = 'https://api.resend.com/emails';
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+  };
 
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const msg = data?.message || data?.error?.message || `Resend request failed (${res.status})`;
+  // Node 18+ has fetch; some hosts still run Node 16 (no fetch).
+  const canFetch = typeof fetch === 'function';
+  let status = 0;
+  let data = null;
+
+  if (canFetch) {
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+    status = res.status;
+    data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const msg = data?.message || data?.error?.message || `Resend request failed (${status})`;
+      const err = new Error(msg);
+      err.status = status;
+      err.data = data;
+      throw err;
+    }
+  } else {
+    const { request } = await import('node:https');
+    const { URL } = await import('node:url');
+
+    const parsed = new URL(url);
+    const body = JSON.stringify(payload);
+
+    const result = await new Promise((resolve, reject) => {
+      const req = request(
+        {
+          protocol: parsed.protocol,
+          hostname: parsed.hostname,
+          port: parsed.port || 443,
+          path: `${parsed.pathname}${parsed.search}`,
+          method: 'POST',
+          headers: {
+            ...headers,
+            'Content-Length': Buffer.byteLength(body),
+          },
+        },
+        (res) => {
+          status = res.statusCode ?? 0;
+          let raw = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk) => {
+            raw += chunk;
+          });
+          res.on('end', () => {
+            try {
+              data = raw ? JSON.parse(raw) : null;
+            } catch {
+              data = { raw };
+            }
+            resolve({ ok: status >= 200 && status < 300 });
+          });
+        },
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+
+    if (!result.ok) {
+      const msg = data?.message || data?.error?.message || `Resend request failed (${status})`;
+      const err = new Error(msg);
+      err.status = status;
+      err.data = data;
+      throw err;
+    }
+  }
+
+  if (!status) status = 200;
+  if (status < 200 || status >= 300) {
+    const msg = data?.message || data?.error?.message || `Resend request failed (${status})`;
     const err = new Error(msg);
-    err.status = res.status;
+    err.status = status;
     err.data = data;
     throw err;
   }
@@ -147,16 +222,22 @@ async function sendViaResend({ to, subject, text, html, replyTo }) {
 
 export async function sendEmail({ to, subject, text, html, replyTo }) {
   // Prefer HTTPS email APIs when explicitly configured, because many hosts block SMTP ports.
+  // Fallback gracefully if the chosen provider is not configured.
   if (env.EMAIL_PROVIDER === 'resend') {
-    if (!hasResendConfig()) {
+    if (hasResendConfig()) return sendViaResend({ to, subject, text, html, replyTo });
+    if (hasSmtpConfig()) logger.warn({ to, subject }, 'email_resend_not_configured_falling_back_to_smtp');
+    else {
       logger.info({ to, subject }, 'email_skipped_resend_not_configured');
       return { skipped: true, reason: 'Resend not configured' };
     }
-    return sendViaResend({ to, subject, text, html, replyTo });
   }
 
   const tx = await getTransporter();
   if (!tx) {
+    if (hasResendConfig()) {
+      logger.warn({ to, subject }, 'email_smtp_not_configured_falling_back_to_resend');
+      return sendViaResend({ to, subject, text, html, replyTo });
+    }
     logger.info({ to, subject }, 'email_skipped_smtp_not_configured');
     return { skipped: true, reason: 'SMTP not configured' };
   }
@@ -174,14 +255,20 @@ export async function sendEmail({ to, subject, text, html, replyTo }) {
   const smtpProvider = env.SMTP_PROVIDER ?? 'custom';
   const fromAddress = resolveFromAddress(smtpProvider);
 
-  const info = await tx.sendMail({
-    from: env.SMTP_FROM_NAME ? { name: env.SMTP_FROM_NAME, address: fromAddress } : fromAddress,
-    to,
-    replyTo: replyTo ?? undefined,
-    subject,
-    text: text ?? undefined,
-    html: html ?? undefined,
-  });
+  let info;
+  try {
+    info = await tx.sendMail({
+      from: env.SMTP_FROM_NAME ? { name: env.SMTP_FROM_NAME, address: fromAddress } : fromAddress,
+      to,
+      replyTo: replyTo ?? undefined,
+      subject,
+      text: text ?? undefined,
+      html: html ?? undefined,
+    });
+  } catch (err) {
+    logger.error({ err, to, subject }, 'email_smtp_send_failed');
+    throw err;
+  }
 
   return { sent: true, messageId: info?.messageId ?? null, response: info?.response ?? null };
 }

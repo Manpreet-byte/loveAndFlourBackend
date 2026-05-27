@@ -32,7 +32,14 @@ export async function adminGetHomepage(req, res, next) {
     const row = await getSiteContentRow({ key: 'homepage' });
     return res.json({
       homepage: row
-        ? { key: row.content_key, title: row.title, content: row.content_json ?? null, content_html: row.content_html ?? null, is_published: !!row.is_published }
+        ? {
+            key: row.content_key,
+            title: row.title,
+            content: row.content_json ?? null,
+            content_html: row.content_html ?? null,
+            is_published: !!row.is_published,
+            updated_at: row.updated_at ?? null,
+          }
         : null,
     });
   } catch (err) {
@@ -45,7 +52,14 @@ export async function adminGetAbout(req, res, next) {
     const row = await getSiteContentRow({ key: 'about' });
     return res.json({
       about: row
-        ? { key: row.content_key, title: row.title, content: row.content_json ?? null, content_html: row.content_html ?? null, is_published: !!row.is_published }
+        ? {
+            key: row.content_key,
+            title: row.title,
+            content: row.content_json ?? null,
+            content_html: row.content_html ?? null,
+            is_published: !!row.is_published,
+            updated_at: row.updated_at ?? null,
+          }
         : null,
     });
   } catch (err) {

@@ -6,11 +6,80 @@ import { invalidateCategories, invalidatePublicCourses } from '../services/cache
 import { enqueuePushForUsers } from '../services/push/pushOutboxService.js';
 import { sanitizeBasicHtml } from '../utils/sanitizeHtml.js';
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function normalizeStructuredLines(value) {
+  if (value == null) return [];
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+  }
+  return String(value)
+    .split(/\r?\n|\s*,\s*/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildBulletSection(title, value) {
+  const items = normalizeStructuredLines(value);
+  if (!items.length) return '';
+  const body = items.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  return `<section><h3>${escapeHtml(title)}</h3><ul>${body}</ul></section>`;
+}
+
+function buildWorkshopContentFromStructured(payload) {
+  const parts = [];
+  const description = String(payload.description ?? '').trim();
+  const singleImageUrl = String(payload.single_image_url ?? '').trim();
+  const carouselImages = normalizeStructuredLines(payload.carousel_images).filter(Boolean);
+
+  if (description) {
+    parts.push(`<section><p>${escapeHtml(description)}</p></section>`);
+  }
+
+  if (singleImageUrl) {
+    parts.push(
+      `<section><figure><img src="${escapeHtml(singleImageUrl)}" alt="${escapeHtml(payload.title ?? 'Workshop image')}" /></figure></section>`,
+    );
+  }
+
+  if (carouselImages.length) {
+    const gallery = carouselImages
+      .map((src, index) => `<figure><img src="${escapeHtml(src)}" alt="${escapeHtml(`${payload.title ?? 'Workshop'} image ${index + 1}`)}" /></figure>`)
+      .join('');
+    parts.push(`<section data-gallery="1">${gallery}</section>`);
+  }
+
+  parts.push(buildBulletSection('What You Get', payload.what_you_get));
+  parts.push(buildBulletSection('Special Collaboration', payload.special_collaboration));
+  parts.push(buildBulletSection("What You’ll Learn", payload.what_you_learn));
+  parts.push(buildBulletSection('Menu with Description', payload.menu_items));
+  parts.push(buildBulletSection('BONUS LEARNING', payload.bonus_learning));
+  parts.push(buildBulletSection('Who This Workshop Is For', payload.who_this_workshop_is_for));
+
+  return parts.filter(Boolean).join('\n');
+}
+
 const createCourseSchema = z.object({
   kind: z.enum(['course', 'workshop']).optional(),
   title: z.string().min(1).max(255),
   summary: z.string().max(5000).optional().nullable(),
   content: z.string().optional().nullable(),
+  description: z.string().max(10000).optional().nullable(),
+  single_image_url: z.string().url().max(1024).optional().nullable(),
+  carousel_images: z.union([z.string(), z.array(z.string())]).optional().nullable(),
+  what_you_get: z.union([z.string(), z.array(z.string())]).optional().nullable(),
+  special_collaboration: z.union([z.string(), z.array(z.string())]).optional().nullable(),
+  what_you_learn: z.union([z.string(), z.array(z.string())]).optional().nullable(),
+  menu_items: z.union([z.string(), z.array(z.string())]).optional().nullable(),
+  bonus_learning: z.union([z.string(), z.array(z.string())]).optional().nullable(),
+  who_this_workshop_is_for: z.union([z.string(), z.array(z.string())]).optional().nullable(),
   featured_image_url: z.string().url().max(1024).optional().nullable(),
   category_ids: z.array(z.coerce.number().int().positive()).default([]),
   qa_enabled: z.coerce.boolean().optional().default(true),
@@ -42,10 +111,12 @@ export async function createCourse(req, res, next) {
     const kind = payload.kind ?? 'course';
     const cleanedSummary = payload.summary != null ? sanitizeBasicHtml(payload.summary) : null;
     const cleanedContent = payload.content != null ? sanitizeBasicHtml(payload.content) : null;
+    const structuredContent = kind === 'workshop' ? sanitizeBasicHtml(buildWorkshopContentFromStructured(payload)) : null;
     const slug = slugify(payload.title);
     const isPublished = Boolean(payload.is_published);
     const publishedAt = isPublished ? new Date() : null;
     const publishAt = !isPublished && payload.publish_at ? toMysqlDatetime(payload.publish_at) : null;
+    const finalContent = [structuredContent, cleanedContent].filter(Boolean).join('\n') || null;
 
     const [result] = await pool.query(
       'INSERT INTO courses (title, slug, kind, summary, content, featured_image_url, qa_enabled, is_published, publish_at, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -53,8 +124,8 @@ export async function createCourse(req, res, next) {
         payload.title,
         slug,
         kind,
-        cleanedSummary ?? null,
-        cleanedContent ?? null,
+        cleanedSummary ?? payload.description ?? null,
+        finalContent,
         payload.featured_image_url ?? null,
         payload.qa_enabled ? 1 : 0,
         isPublished ? 1 : 0,
@@ -197,9 +268,11 @@ export async function updateCourse(req, res, next) {
       fields.push('summary = ?');
       values.push(payload.summary == null ? null : sanitizeBasicHtml(payload.summary));
     }
-    if (payload.content !== undefined) {
+    if (payload.content !== undefined || payload.description !== undefined || payload.single_image_url !== undefined || payload.carousel_images !== undefined || payload.what_you_get !== undefined || payload.special_collaboration !== undefined || payload.what_you_learn !== undefined || payload.menu_items !== undefined || payload.bonus_learning !== undefined || payload.who_this_workshop_is_for !== undefined) {
       fields.push('content = ?');
-      values.push(payload.content == null ? null : sanitizeBasicHtml(payload.content));
+      const rawContent = payload.content == null ? null : sanitizeBasicHtml(payload.content);
+      const structuredContent = buildWorkshopContentFromStructured(payload);
+      values.push([structuredContent, rawContent].filter(Boolean).join('\n') || null);
     }
     if (payload.featured_image_url !== undefined) {
       fields.push('featured_image_url = ?');
@@ -212,6 +285,10 @@ export async function updateCourse(req, res, next) {
     if (payload.publish_at !== undefined) {
       fields.push('publish_at = ?');
       values.push(payload.publish_at ? toMysqlDatetime(payload.publish_at) : null);
+    }
+    if (payload.summary === undefined && payload.description !== undefined) {
+      fields.push('summary = ?');
+      values.push(payload.description == null ? null : sanitizeBasicHtml(payload.description));
     }
     if (payload.is_published !== undefined) {
       fields.push('is_published = ?');
